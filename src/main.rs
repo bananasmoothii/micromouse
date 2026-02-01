@@ -5,12 +5,13 @@ extern crate alloc;
 mod distance_sensor;
 mod vec_extension;
 
+use alloc::vec::Vec;
 use panic_probe as _;
 use defmt_rtt as _;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::exti::{self, ExtiInput};
-use embassy_stm32::gpio::{Level, Output, Speed};
+use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::i2c;
@@ -58,7 +59,7 @@ async fn main(spawner: Spawner) {
     );
 
     // GPIO interrupt pin for VL53L1X (active low when measurement ready)
-    let gpio_interrupt = ExtiInput::new(p.PA0, p.EXTI0, embassy_stm32::gpio::Pull::None, Irqs);
+    let gpio_interrupt = ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs);
 
     // XSHUT pin for VL53L1X (active low to disable sensor)
     let xshut_pin = Output::new(p.PA4, Level::Low, Speed::Low);
@@ -71,10 +72,23 @@ async fn main(spawner: Spawner) {
         xshut_pin,
     )).unwrap();
 
-    // Main task can do other things here
     info!("Main task ready");
+    let mut button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
+    let mut led = Output::new(p.PA5, Level::Low, Speed::Medium);
+
+    let mut toggle_led = || {
+        led.toggle();
+    };
+
+
+    let mut button_actions: Vec<&mut dyn FnMut()> = Vec::new();
+    button_actions.push(&mut toggle_led);
+
+
     loop {
-        // Main task loop - can add other functionality here
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+        button.wait_for_any_edge().await;
+        for action in button_actions.iter_mut() {
+            action()
+        }
     }
 }
