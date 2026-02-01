@@ -1,9 +1,12 @@
+use alloc::format;
+use alloc::string::String;
 use defmt::*;
 use embassy_stm32::exti::ExtiInput;
-use embassy_stm32::gpio::{Output, Level, Speed};
-use embassy_stm32::i2c::{I2c, Master};
+use embassy_stm32::gpio::{Level, Output, Speed};
+use embassy_stm32::i2c::{Error, I2c, Master};
 use embassy_stm32::mode::Async;
 use embassy_time::{Delay, Duration, Timer};
+use vl53l1::RangeStatus::SIGNAL_FAIL;
 
 /// Configuration for the VL53L1X distance sensor
 pub struct DistanceSensorConfig {
@@ -51,16 +54,22 @@ pub async fn init_sensor(
 
     // Set full field of view
     info!("  Setting ROI...");
-    vl53l1::set_user_roi(&mut dev, vl53l1::UserRoi {
-        top_left_x: 0,
-        top_left_y: 15,
-        bot_right_x: 15,
-        bot_right_y: 0,
-    })?;
+    vl53l1::set_user_roi(
+        &mut dev,
+        vl53l1::UserRoi {
+            top_left_x: 0,
+            top_left_y: 15,
+            bot_right_x: 15,
+            bot_right_y: 0,
+        },
+    )?;
 
     info!("  Setting timing budget and inter-measurement period...");
     vl53l1::set_measurement_timing_budget_micro_seconds(&mut dev, config.timing_budget_us)?;
-    vl53l1::set_inter_measurement_period_milli_seconds(&mut dev, config.inter_measurement_period_ms)?;
+    vl53l1::set_inter_measurement_period_milli_seconds(
+        &mut dev,
+        config.inter_measurement_period_ms,
+    )?;
 
     info!("  Starting measurement...");
     vl53l1::start_measurement(&mut dev, i2c)?;
@@ -92,8 +101,8 @@ pub async fn distance_sensor_task(
     mut gpio_interrupt: ExtiInput<'static>,
     mut xshut_pin: Output<'static>,
 ) {
-    // Initialize the sensor
-    let mut dev = match init_sensor(&mut i2c, &mut xshut_pin, DistanceSensorConfig::default()).await {
+    let mut dev = match init_sensor(&mut i2c, &mut xshut_pin, DistanceSensorConfig::default()).await
+    {
         Ok(dev) => dev,
         Err(e) => {
             error!("Failed to initialize VL53L1X sensor: {:?}", e);
@@ -103,9 +112,23 @@ pub async fn distance_sensor_task(
 
     info!("Distance sensor task running");
 
+    let mut recorver = false;
+
     loop {
-        // Wait for measurement ready interrupt
-        gpio_interrupt.wait_for_falling_edge().await;
+        if !recorver {
+            gpio_interrupt.wait_for_falling_edge().await;
+        } else {
+            while let Err(e) = vl53l1::wait_measurement_data_ready(&mut dev, &mut i2c, &mut Delay) {
+                let str = match e {
+                    nb::Error::Other(e) => format!("other error: {:?}", e),
+                    nb::Error::WouldBlock => String::from("Operation would block"),
+                };
+                warn!("Waiting for measurement data ready failed ({}), retrying...", str.as_str());
+                Timer::after(Duration::from_millis(10)).await;
+            }
+            info!("Measurement data ready after recovery");
+            recorver = false;
+        }
 
         // Get the ranging measurement data
         match vl53l1::get_ranging_measurement_data(&mut dev, &mut i2c) {
@@ -113,15 +136,14 @@ pub async fn distance_sensor_task(
                 warn!("Error getting ranging data: {:?}", e);
                 if recover_sensor(&mut dev, &mut i2c).await.is_err() {
                     error!("Failed to recover sensor, waiting before retry...");
+                    recorver = true;
                     Timer::after(Duration::from_millis(500)).await;
                 }
                 continue;
             }
             Ok(rmd) => {
                 // Check if data looks valid
-                if rmd.range_quality_level == 0 {
-                    warn!("Invalid measurement data (quality=0)");
-                } else {
+                if rmd.range_status != SIGNAL_FAIL {
                     info!(
                         "Distance: {} mm (σ: {} mm, status: {:?})",
                         rmd.range_milli_meter,
@@ -133,11 +155,14 @@ pub async fn distance_sensor_task(
         }
 
         // Clear interrupt and start next measurement
-        if let Err(e) = vl53l1::clear_interrupt_and_start_measurement(&mut dev, &mut i2c, &mut Delay) {
+        if let Err(e) =
+            vl53l1::clear_interrupt_and_start_measurement(&mut dev, &mut i2c, &mut Delay)
+        {
             warn!("Error clearing interrupt: {:?}", e);
             if recover_sensor(&mut dev, &mut i2c).await.is_err() {
                 error!("Failed to recover sensor, waiting before retry...");
                 Timer::after(Duration::from_millis(500)).await;
+                recorver = true;
             }
         }
     }
