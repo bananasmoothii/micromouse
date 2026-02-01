@@ -38,7 +38,8 @@ async fn main(_spawner: Spawner) {
 
     info!("Initialising I2C");
     let mut config = i2c::Config::default();
-    config.frequency = Hertz::khz(400);
+    // Use 100kHz for more reliable communication
+    config.frequency = Hertz::khz(100);
     config.gpio_speed = Speed::High;
 
     let mut i2c = I2c::new(
@@ -54,11 +55,12 @@ async fn main(_spawner: Spawner) {
     let mut vl53l1_dev = vl53l1::Device::default();
 
     info!("Toggling XSHUT pin...");
-    let mut xshut_pin = Output::new(p.PA4, Level::High, Speed::Low);
-    xshut_pin.set_low();
+    // XSHUT is active LOW - start with device disabled, then enable it
+    let mut xshut_pin = Output::new(p.PA4, Level::Low, Speed::Low);
     Timer::after(Duration::from_millis(10)).await;
     xshut_pin.set_high();
-    Timer::after(Duration::from_millis(10)).await;
+    // Wait for device to power up and stabilize (recommended: at least 2ms)
+    Timer::after(Duration::from_millis(100)).await;
 
     info!("Software reset...");
     while let Err(_e) = vl53l1::software_reset(&mut vl53l1_dev, &mut i2c, &mut Delay) {
@@ -70,11 +72,15 @@ async fn main(_spawner: Spawner) {
     info!("Data init...");
     while let Err(e) = vl53l1::data_init(&mut vl53l1_dev, &mut i2c) {
         info!("  Error during data init: {:?}", e);
+        Timer::after(Duration::from_millis(100)).await;
     }
     info!("  Complete");
 
     info!("Static init...");
-    while vl53l1::static_init(&mut vl53l1_dev).is_err() {}
+    while let Err(e) = vl53l1::static_init(&mut vl53l1_dev) {
+        info!("  Error during static init: {:?}", e);
+        Timer::after(Duration::from_millis(100)).await;
+    }
     info!("  Complete");
 
     info!("Setting region of interest...");
@@ -84,15 +90,27 @@ async fn main(_spawner: Spawner) {
         top_left_x: 6,
         top_left_y: 10,
     };
-    while vl53l1::set_user_roi(&mut vl53l1_dev, roi.clone()).is_err() {}
+    while let Err(e) = vl53l1::set_user_roi(&mut vl53l1_dev, roi.clone()) {
+        info!("  Error setting ROI: {:?}", e);
+        Timer::after(Duration::from_millis(100)).await;
+    }
     info!("  Complete");
 
     info!("Setting timing budget and inter-measurement period...");
-    while vl53l1::set_measurement_timing_budget_micro_seconds(&mut vl53l1_dev, 100_000).is_err() {}
-    while vl53l1::set_inter_measurement_period_milli_seconds(&mut vl53l1_dev, 200).is_err() {}
+    while let Err(e) = vl53l1::set_measurement_timing_budget_micro_seconds(&mut vl53l1_dev, 100_000) {
+        info!("  Error setting timing budget: {:?}", e);
+        Timer::after(Duration::from_millis(100)).await;
+    }
+    while let Err(e) = vl53l1::set_inter_measurement_period_milli_seconds(&mut vl53l1_dev, 200) {
+        info!("  Error setting inter-measurement period: {:?}", e);
+        Timer::after(Duration::from_millis(100)).await;
+    }
 
     info!("Start measurement...");
-    while vl53l1::start_measurement(&mut vl53l1_dev, &mut i2c).is_err() {}
+    while let Err(e) = vl53l1::start_measurement(&mut vl53l1_dev, &mut i2c) {
+        info!("  Error starting measurement: {:?}", e);
+        Timer::after(Duration::from_millis(100)).await;
+    }
     info!("  Complete");
 
     loop {

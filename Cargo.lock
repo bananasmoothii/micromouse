@@ -72,6 +72,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d7e60934ceec538daadb9d8432424ed043a904d8e0243f3c6446bce549a46ac"
 
 [[package]]
+name = "bitfield"
+version = "0.19.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21ba6517c6b0f2bf08be60e187ab64b038438f22dd755614d8fe4d4098c46419"
+dependencies = [
+ "bitfield-macros",
+]
+
+[[package]]
+name = "bitfield-macros"
+version = "0.19.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f48d6ace212fdf1b45fd6b566bb40808415344642b76c3224c07c8df9da81e97"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -466,7 +486,7 @@ dependencies = [
  "panic-probe",
  "static_cell",
  "usbd-hid 0.9.0",
-    "vl53l1",
+ "vl53l1",
 ]
 
 [[package]]
@@ -872,9 +892,9 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "portable-atomic"
-version = "1.13.0"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f89776e4d69bb58bc6993e99ffa1d11f228b839984854c7daeb5d37f87cbe950"
+checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "proc-macro-error-attr2"
@@ -1248,23 +1268,23 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vl53l1"
 version = "0.2.0"
 dependencies = [
-    "bitfield 0.14.0",
-    "defmt 1.0.1",
-    "defmt-rtt",
-    "embedded-hal 1.0.0",
-    "log",
-    "nb 1.1.0",
-    "vl53l1-reg",
+ "bitfield 0.19.4",
+ "defmt 1.0.1",
+ "defmt-rtt",
+ "embedded-hal 1.0.0",
+ "log",
+ "nb 1.1.0",
+ "vl53l1-reg",
 ]
 
 [[package]]
 name = "vl53l1-reg"
 version = "0.2.0"
 dependencies = [
-    "bitfield 0.14.0",
-    "defmt 1.0.1",
-    "defmt-rtt",
-    "embedded-hal 1.0.0",
+ "bitfield 0.19.4",
+ "defmt 1.0.1",
+ "defmt-rtt",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -1284,18 +1304,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.34"
+version = "0.8.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71ddd76bcebeed25db614f82bf31a9f4222d3fbba300e6fb6c00afa26cbd4d9d"
+checksum = "7456cf00f0685ad319c5b1693f291a650eaf345e941d082fc4e03df8a03996ac"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.34"
+version = "0.8.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8187381b52e32220d50b255276aa16a084ec0a9017a0ca2152a1f55c539758d"
+checksum = "1328722bbf2115db7e19d69ebcc15e795719e2d66b60827c6a69a117365e37a0"
 dependencies = [
  "proc-macro2",
  "quote",
