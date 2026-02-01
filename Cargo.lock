@@ -466,6 +466,7 @@ dependencies = [
  "panic-probe",
  "static_cell",
  "usbd-hid 0.9.0",
+    "vl53l1",
 ]
 
 [[package]]
@@ -1242,6 +1243,29 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vl53l1"
+version = "0.2.0"
+dependencies = [
+    "bitfield 0.14.0",
+    "defmt 1.0.1",
+    "defmt-rtt",
+    "embedded-hal 1.0.0",
+    "log",
+    "nb 1.1.0",
+    "vl53l1-reg",
+]
+
+[[package]]
+name = "vl53l1-reg"
+version = "0.2.0"
+dependencies = [
+    "bitfield 0.14.0",
+    "defmt 1.0.1",
+    "defmt-rtt",
+    "embedded-hal 1.0.0",
+]
 
 [[package]]
 name = "void"

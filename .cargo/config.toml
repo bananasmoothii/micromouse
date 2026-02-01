@@ -1,6 +1,6 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 # replace STM32F429ZITx with your chip as listed in `probe-rs chip list`
-runner = "probe-rs run --connect-under-reset --disable-progressbars --chip STM32F446RE"
+runner = "probe-rs run --connect-under-reset --chip STM32F446RE"
 
 [build]
 target = "thumbv7em-none-eabi"
