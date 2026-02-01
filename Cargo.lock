@@ -1270,9 +1270,7 @@ version = "0.2.0"
 dependencies = [
  "bitfield 0.19.4",
  "defmt 1.0.1",
- "defmt-rtt",
  "embedded-hal 1.0.0",
- "log",
  "nb 1.1.0",
  "vl53l1-reg",
 ]
@@ -1282,8 +1280,6 @@ name = "vl53l1-reg"
 version = "0.2.0"
 dependencies = [
  "bitfield 0.19.4",
- "defmt 1.0.1",
- "defmt-rtt",
  "embedded-hal 1.0.0",
 ]
 
