@@ -2,8 +2,9 @@ use alloc::format;
 use alloc::string::String;
 use defmt::*;
 use embassy_stm32::exti::ExtiInput;
-use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::i2c::{Error, I2c, Master};
+use embassy_stm32::gpio::{Output};
+use embassy_stm32::i2c;
+use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
 use embassy_time::{Delay, Duration, Timer};
 use vl53l1::RangeStatus::SIGNAL_FAIL;
@@ -30,7 +31,7 @@ pub async fn init_sensor(
     i2c: &mut I2c<'static, Async, Master>,
     xshut_pin: &mut Output<'static>,
     config: DistanceSensorConfig,
-) -> Result<vl53l1::Device, vl53l1::Error<embassy_stm32::i2c::Error>> {
+) -> Result<vl53l1::Device, vl53l1::Error<i2c::Error>> {
     info!("Initializing VL53L1X distance sensor");
 
     // Toggle XSHUT pin to reset the device
@@ -82,7 +83,7 @@ pub async fn init_sensor(
 async fn recover_sensor(
     dev: &mut vl53l1::Device,
     i2c: &mut I2c<'static, Async, Master>,
-) -> Result<(), vl53l1::Error<embassy_stm32::i2c::Error>> {
+) -> Result<(), vl53l1::Error<i2c::Error>> {
     info!("  Attempting sensor recovery...");
     let _ = vl53l1::stop_measurement(dev, i2c);
     Timer::after(Duration::from_millis(100)).await;

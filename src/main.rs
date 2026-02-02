@@ -45,7 +45,7 @@ async fn main(spawner: Spawner) {
     info!("Setting up I2C for VL53L1X sensor");
     let mut i2c_config = i2c::Config::default();
     // Use 100kHz for more reliable communication
-    i2c_config.frequency = Hertz::khz(100);
+    i2c_config.frequency = Hertz::khz(200);
     i2c_config.gpio_speed = Speed::High;
 
     let i2c = I2c::new(
