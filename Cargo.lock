@@ -456,41 +456,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embassy-stm32f4-examples"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "cortex-m",
- "cortex-m-rt",
- "critical-section",
- "defmt 1.0.1",
- "defmt-rtt",
- "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-net-wiznet",
- "embassy-stm32",
- "embassy-sync",
- "embassy-time",
- "embassy-usb",
- "embedded-alloc",
- "embedded-hal 1.0.0",
- "embedded-hal-bus",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "embedded-storage",
- "futures-util",
- "heapless 0.8.0",
- "micromath",
- "nb 1.1.0",
- "panic-probe",
- "static_cell",
- "usbd-hid 0.9.0",
- "vl53l0x",
- "vl53l1",
-]
-
-[[package]]
 name = "embassy-sync"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -838,6 +803,41 @@ name = "micromath"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
+
+[[package]]
+name = "micromouse"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cortex-m",
+ "cortex-m-rt",
+ "critical-section",
+ "defmt 1.0.1",
+ "defmt-rtt",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-net",
+ "embassy-net-wiznet",
+ "embassy-stm32",
+ "embassy-sync",
+ "embassy-time",
+ "embassy-usb",
+ "embedded-alloc",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "embedded-storage",
+ "futures-util",
+ "heapless 0.8.0",
+ "micromath",
+ "nb 1.1.0",
+ "panic-probe",
+ "static_cell",
+ "usbd-hid 0.9.0",
+ "vl53l0x",
+ "vl53l1",
+]
 
 [[package]]
 name = "nb"
@@ -1278,6 +1278,7 @@ dependencies = [
 [[package]]
 name = "vl53l1"
 version = "0.2.0"
+source = "git+https://github.com/bananasmoothii/vl53l1#b46f6bc83e27d9d4d97ae27e180e398547140d06"
 dependencies = [
  "bitfield 0.19.4",
  "defmt 1.0.1",
@@ -1289,6 +1290,7 @@ dependencies = [
 [[package]]
 name = "vl53l1-reg"
 version = "0.2.0"
+source = "git+https://github.com/bananasmoothii/vl53l1#b46f6bc83e27d9d4d97ae27e180e398547140d06"
 dependencies = [
  "bitfield 0.19.4",
  "embedded-hal 1.0.0",
