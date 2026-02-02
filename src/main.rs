@@ -4,7 +4,6 @@ extern crate alloc;
 
 mod distance_sensor;
 mod sensor;
-mod vec_extension;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -33,7 +32,6 @@ bind_interrupts!(
         EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
         // used for gpio input (VL53L1X interrupt)
         EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
-        EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
         // I2C1 interrupts
         I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
         I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
@@ -91,27 +89,6 @@ async fn main(mut spawner: Spawner) {
                 core::panic!("Sensor initialization failed");
             }
         };
-
-    // // TODO: put real values
-    // let sensor = match sensor::vl53lxx::vl53l1x::VL53L1XSensor::init_new(
-    //     Config {
-    //         timing_config: TimingConfig::default(),
-    //         xshut_pin: Output::new(p.PA2, Level::Low, Speed::Low),
-    //         gpio_interrupt: ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs),
-    //     },
-    //     i2c_mutex,
-    // )
-    // .await
-    // {
-    //     Ok(s) => {
-    //         info!("Distance sensor initialized successfully");
-    //         Box::leak(Box::new(s))
-    //     }
-    //     Err(e) => {
-    //         error!("Failed to initialize distance sensor: {:?}", e);
-    //         core::panic!("Sensor initialization failed");
-    //     }
-    // };
 
     // Start continuous measurement in the background
     info!("Starting continuous measurement");
