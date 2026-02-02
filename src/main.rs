@@ -6,7 +6,9 @@ mod distance_sensor;
 mod sensor;
 
 use alloc::boxed::Box;
+use alloc::format;
 use alloc::vec::Vec;
+use core::fmt::Debug;
 use defmt::*;
 use defmt_rtt as _;
 use embassy_executor::Spawner;
@@ -23,6 +25,7 @@ use panic_probe as _;
 use sensor::Sensor;
 use sensor::vl53lxx::vl53l1x::VL53L1XSensor;
 use sensor::vl53lxx::{Config, TimingConfig};
+use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -47,7 +50,6 @@ async fn main(mut spawner: Spawner) {
 
     let p = embassy_stm32::init(Default::default());
 
-    info!("Setting up I2C for VL53L1X sensor");
     let mut i2c_config = i2c::Config::default();
     // Use 100kHz for more reliable communication
     i2c_config.frequency = Hertz::khz(200);
@@ -79,7 +81,7 @@ async fn main(mut spawner: Spawner) {
         gpio_interrupt,
     };
 
-    let sensor1_future = VL53L1XSensor::init_new(sensor_config, i2c_mutex);
+    let sensor1_future = VL53L0XSensor::init_new(sensor_config, i2c_mutex);
 
     let sensor = match sensor1_future.await {
         Ok(s) => {
@@ -87,7 +89,9 @@ async fn main(mut spawner: Spawner) {
             Box::leak(Box::new(s))
         }
         Err(e) => {
-            error!("Failed to initialize distance sensor: {:?}", e);
+            let s = format!("{:?}", e);
+            let s: &str = s.as_ref();
+            error!("Failed to initialize distance sensor: {}", s);
             core::panic!("Sensor initialization failed");
         }
     };

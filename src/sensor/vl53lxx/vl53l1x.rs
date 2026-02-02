@@ -22,7 +22,7 @@ pub struct VL53L1XSensor<'a> {
 }
 
 // Step 1: Implement the base Sensor trait
-impl<'a> Sensor<'a, RangingMeasurementData, Error<i2c::Error>> for VL53L1XSensor<'a>
+impl<'a> Sensor<'a, RangingMeasurementData, Error<i2c::Error>, SpawnError> for VL53L1XSensor<'a>
 where
     Self: Sized,
 {
@@ -86,7 +86,7 @@ where
         })
     }
 
-    fn start_continuous_measurement(
+    fn start_continuous_measurement<>(
         &'static mut self,
         spawner: &mut Spawner,
     ) -> Result<(), SpawnError> {
