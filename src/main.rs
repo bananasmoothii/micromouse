@@ -3,24 +3,26 @@
 extern crate alloc;
 
 mod distance_sensor;
-mod vec_extension;
 mod sensor;
+mod vec_extension;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use panic_probe as _;
-use defmt_rtt as _;
 use defmt::*;
+use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::exti::{self, ExtiInput};
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
-use embassy_stm32::{bind_interrupts, interrupt};
-use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::i2c;
-use embassy_stm32::mode::Async;
+use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::time::Hertz;
+use embassy_stm32::{bind_interrupts, interrupt};
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::mutex::Mutex;
 use embedded_alloc::LlffHeap as Heap;
-use vl53l1::RangingMeasurementData;
+use panic_probe as _;
+use sensor::Sensor;
+use sensor::vl53lxx::{Config, TimingConfig};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -31,6 +33,7 @@ bind_interrupts!(
         EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
         // used for gpio input (VL53L1X interrupt)
         EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
+        EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
         // I2C1 interrupts
         I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
         I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
@@ -52,15 +55,15 @@ async fn main(mut spawner: Spawner) {
     i2c_config.gpio_speed = Speed::High;
 
     // I2C needs to be leaked to get a 'static reference for the sensor
-    let i2c = Box::leak(Box::new(I2c::new(
-        p.I2C1,
-        p.PB8,  // SCL
-        p.PB9,  // SDA
-        Irqs,
-        p.DMA1_CH6,  // TX DMA
-        p.DMA1_CH0,  // RX DMA
+    let i2c = I2c::new(
+        p.I2C1, p.PB8, // SCL
+        p.PB9, // SDA
+        Irqs, p.DMA1_CH6, // TX DMA
+        p.DMA1_CH0, // RX DMA
         i2c_config,
-    )));
+    );
+    let i2c_mutex: Mutex<CriticalSectionRawMutex, _> = Mutex::new(i2c);
+    let i2c_mutex = Box::leak(Box::new(i2c_mutex));
 
     // GPIO interrupt pin for VL53L1X (active low when measurement ready)
     let gpio_interrupt = ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs);
@@ -70,8 +73,6 @@ async fn main(mut spawner: Spawner) {
 
     // Initialize the distance sensor using the trait-based API
     info!("Initializing distance sensor");
-    use sensor::Sensor;
-    use sensor::vl53lxx::{Config, TimingConfig};
 
     let sensor_config = Config {
         timing_config: TimingConfig::default(),
@@ -79,16 +80,38 @@ async fn main(mut spawner: Spawner) {
         gpio_interrupt,
     };
 
-    let mut sensor = match sensor::vl53lxx::vl53l1x::VL53L1XSensor::init_new(sensor_config, i2c).await {
-        Ok(s) => {
-            info!("Distance sensor initialized successfully");
-            Box::leak(Box::new(s))
-        }
-        Err(e) => {
-            error!("Failed to initialize distance sensor: {:?}", e);
-            core::panic!("Sensor initialization failed");
-        }
-    };
+    let sensor =
+        match sensor::vl53lxx::vl53l1x::VL53L1XSensor::init_new(sensor_config, i2c_mutex).await {
+            Ok(s) => {
+                info!("Distance sensor initialized successfully");
+                Box::leak(Box::new(s))
+            }
+            Err(e) => {
+                error!("Failed to initialize distance sensor: {:?}", e);
+                core::panic!("Sensor initialization failed");
+            }
+        };
+
+    // // TODO: put real values
+    // let sensor = match sensor::vl53lxx::vl53l1x::VL53L1XSensor::init_new(
+    //     Config {
+    //         timing_config: TimingConfig::default(),
+    //         xshut_pin: Output::new(p.PA2, Level::Low, Speed::Low),
+    //         gpio_interrupt: ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs),
+    //     },
+    //     i2c_mutex,
+    // )
+    // .await
+    // {
+    //     Ok(s) => {
+    //         info!("Distance sensor initialized successfully");
+    //         Box::leak(Box::new(s))
+    //     }
+    //     Err(e) => {
+    //         error!("Failed to initialize distance sensor: {:?}", e);
+    //         core::panic!("Sensor initialization failed");
+    //     }
+    // };
 
     // Start continuous measurement in the background
     info!("Starting continuous measurement");
@@ -102,10 +125,8 @@ async fn main(mut spawner: Spawner) {
         led.toggle();
     };
 
-
     let mut button_actions: Vec<&mut dyn FnMut()> = Vec::new();
     button_actions.push(&mut toggle_led);
-
 
     loop {
         button.wait_for_any_edge().await;

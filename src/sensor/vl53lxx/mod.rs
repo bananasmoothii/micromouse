@@ -1,7 +1,5 @@
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
-use embassy_stm32::mode::Async;
-use embassy_stm32::i2c::{I2c, Master};
 
 pub mod vl53l1x;
 
