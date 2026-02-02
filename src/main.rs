@@ -4,7 +4,9 @@ extern crate alloc;
 
 mod distance_sensor;
 mod vec_extension;
+mod sensor;
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use panic_probe as _;
 use defmt_rtt as _;
@@ -18,6 +20,7 @@ use embassy_stm32::i2c;
 use embassy_stm32::mode::Async;
 use embassy_stm32::time::Hertz;
 use embedded_alloc::LlffHeap as Heap;
+use vl53l1::RangingMeasurementData;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -35,7 +38,7 @@ bind_interrupts!(
 );
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(mut spawner: Spawner) {
     unsafe {
         embedded_alloc::init!(HEAP, 1024);
     }
@@ -48,7 +51,8 @@ async fn main(spawner: Spawner) {
     i2c_config.frequency = Hertz::khz(200);
     i2c_config.gpio_speed = Speed::High;
 
-    let i2c = I2c::new(
+    // I2C needs to be leaked to get a 'static reference for the sensor
+    let i2c = Box::leak(Box::new(I2c::new(
         p.I2C1,
         p.PB8,  // SCL
         p.PB9,  // SDA
@@ -56,7 +60,7 @@ async fn main(spawner: Spawner) {
         p.DMA1_CH6,  // TX DMA
         p.DMA1_CH0,  // RX DMA
         i2c_config,
-    );
+    )));
 
     // GPIO interrupt pin for VL53L1X (active low when measurement ready)
     let gpio_interrupt = ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs);
@@ -64,13 +68,31 @@ async fn main(spawner: Spawner) {
     // XSHUT pin for VL53L1X (active low to disable sensor)
     let xshut_pin = Output::new(p.PA4, Level::Low, Speed::Low);
 
-    // Spawn the distance sensor task
-    info!("Spawning distance sensor task");
-    spawner.spawn(distance_sensor::distance_sensor_task(
-        i2c,
-        gpio_interrupt,
+    // Initialize the distance sensor using the trait-based API
+    info!("Initializing distance sensor");
+    use sensor::Sensor;
+    use sensor::vl53lxx::{Config, TimingConfig};
+
+    let sensor_config = Config {
+        timing_config: TimingConfig::default(),
         xshut_pin,
-    )).unwrap();
+        gpio_interrupt,
+    };
+
+    let mut sensor = match sensor::vl53lxx::vl53l1x::VL53L1XSensor::init_new(sensor_config, i2c).await {
+        Ok(s) => {
+            info!("Distance sensor initialized successfully");
+            Box::leak(Box::new(s))
+        }
+        Err(e) => {
+            error!("Failed to initialize distance sensor: {:?}", e);
+            core::panic!("Sensor initialization failed");
+        }
+    };
+
+    // Start continuous measurement in the background
+    info!("Starting continuous measurement");
+    sensor.start_continuous_measurement(&mut spawner).unwrap();
 
     info!("Main task ready");
     let mut button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
