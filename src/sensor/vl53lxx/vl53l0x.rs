@@ -32,7 +32,7 @@ impl<'a> I2cTrait for I2cWrapper<'a> {
         // We need to block on the async operation
         embassy_futures::block_on(async {
             let mut i2c = self.i2c.lock().await;
-            i2c.read(address, buffer).await
+            i2c.blocking_read(address, buffer)
         })
     }
 
@@ -40,7 +40,7 @@ impl<'a> I2cTrait for I2cWrapper<'a> {
         // We need to block on the async operation
         embassy_futures::block_on(async {
             let mut i2c = self.i2c.lock().await;
-            i2c.write(address, bytes).await
+            i2c.blocking_write(address, bytes)
         })
     }
 
@@ -53,7 +53,7 @@ impl<'a> I2cTrait for I2cWrapper<'a> {
         // We need to block on the async operation
         embassy_futures::block_on(async {
             let mut i2c = self.i2c.lock().await;
-            i2c.write_read(address, bytes, buffer).await
+            i2c.blocking_write_read(address, bytes, buffer)
         })
     }
 
@@ -65,7 +65,7 @@ impl<'a> I2cTrait for I2cWrapper<'a> {
         // We need to block on the async operation
         embassy_futures::block_on(async {
             let mut i2c = self.i2c.lock().await;
-            i2c.transaction(address, operations).await
+            i2c.blocking_transaction(address, operations)
         })
     }
 }
