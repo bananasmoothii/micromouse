@@ -13,14 +13,15 @@ use embassy_executor::Spawner;
 use embassy_stm32::exti::{self, ExtiInput};
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::i2c;
-use embassy_stm32::i2c::{I2c, Master};
+use embassy_stm32::i2c::I2c;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::{bind_interrupts, interrupt};
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
 use sensor::Sensor;
+use sensor::vl53lxx::vl53l1x::VL53L1XSensor;
 use sensor::vl53lxx::{Config, TimingConfig};
 
 #[global_allocator]
@@ -78,19 +79,19 @@ async fn main(mut spawner: Spawner) {
         gpio_interrupt,
     };
 
-    let sensor =
-        match sensor::vl53lxx::vl53l1x::VL53L1XSensor::init_new(sensor_config, i2c_mutex).await {
-            Ok(s) => {
-                info!("Distance sensor initialized successfully");
-                Box::leak(Box::new(s))
-            }
-            Err(e) => {
-                error!("Failed to initialize distance sensor: {:?}", e);
-                core::panic!("Sensor initialization failed");
-            }
-        };
+    let sensor1_future = VL53L1XSensor::init_new(sensor_config, i2c_mutex);
 
-    // Start continuous measurement in the background
+    let sensor = match sensor1_future.await {
+        Ok(s) => {
+            info!("Distance sensor initialized successfully");
+            Box::leak(Box::new(s))
+        }
+        Err(e) => {
+            error!("Failed to initialize distance sensor: {:?}", e);
+            core::panic!("Sensor initialization failed");
+        }
+    };
+
     info!("Starting continuous measurement");
     sensor.start_continuous_measurement(&mut spawner).unwrap();
 
