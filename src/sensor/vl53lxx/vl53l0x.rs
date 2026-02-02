@@ -1,5 +1,5 @@
 use alloc::format;
-use defmt::{debug, error, info, warn};
+use defmt::{debug, error, info, trace, warn, Format};
 use crate::sensor::Sensor;
 use crate::sensor::vl53lxx::Config;
 use embassy_executor::{SpawnError, Spawner};
@@ -80,7 +80,13 @@ pub struct VL53L0XSensor<'a> {
     last_data: u16,
 }
 
-impl<'a> Sensor<'a, u16, Error<i2c::Error>, i2c::Error> for VL53L0XSensor<'a>
+#[derive(Debug, Format)]
+pub enum StartError {
+    I2cError(i2c::Error),
+    SpawnError(SpawnError),
+}
+
+impl<'a> Sensor<'a, u16, Error<i2c::Error>, StartError> for VL53L0XSensor<'a>
 where
     Self: Sized,
 {
@@ -113,8 +119,10 @@ where
         })
     }
 
-    fn start_continuous_measurement(&'static mut self, spawner: &mut Spawner) -> Result<(), i2c::Error> {
-        self.device.start_continuous(0)
+    fn start_continuous_measurement(&'static mut self, spawner: &mut Spawner) -> Result<(), StartError> {
+        self.device.start_continuous(0).map_err(|e| StartError::I2cError(e))?;
+        spawner.spawn(distance_sensor_task(self)).map_err(|e| StartError::SpawnError(e))?;
+        Ok(())
     }
 
     fn get_latest_measurement(&self) -> Result<&u16, Error<i2c::Error>> {
