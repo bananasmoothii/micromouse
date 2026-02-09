@@ -1270,10 +1270,10 @@ name = "vl53l0x"
 version = "1.0.1"
 source = "git+https://github.com/bananasmoothii/vl53l0x#7e09be313b8d325c13561a5e274d37be7b0c30ad"
 dependencies = [
-    "embassy-sync",
+ "embassy-sync",
  "embedded-hal 1.0.0",
-    "embedded-hal-async",
-    "nb 1.1.0",
+ "embedded-hal-async",
+ "nb 1.1.0",
 ]
 
 [[package]]
