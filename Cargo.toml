@@ -39,7 +39,7 @@ chrono = { version = "^0.4", default-features = false }
 
 # vl53l1 = { git = "https://github.com/trung1-dothanh/vl53l1", rev = "26745b652e7c8aad1c03319e32b8552889bf6fbe" } # version that uses embedded-hal 1.0, update when new version is released
 vl53l1 = { git = "https://github.com/bananasmoothii/vl53l1", features = ["defmt"] }
-vl53l0x = "1.0.1"
+vl53l0x = { git = "https://github.com/bananasmoothii/vl53l0x", features = ["async"] }
 
 [profile.release]
 debug = 2

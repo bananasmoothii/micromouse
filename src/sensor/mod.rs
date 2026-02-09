@@ -14,7 +14,7 @@ pub trait Sensor<'a, M: Format, E, StartError: Format>: Sized {
         i2c: &'a mut Mutex<CriticalSectionRawMutex, I2c<'static, Async, Master>>,
     ) -> Result<Self, E>;
 
-    fn start_continuous_measurement(&'static mut self, spawner: &mut Spawner) -> Result<(), StartError>;
+    async fn start_continuous_measurement(&'static mut self, spawner: &mut Spawner) -> Result<(), StartError>;
 
     fn get_latest_measurement(&self) -> Result<&M, E>;
 }

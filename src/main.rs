@@ -97,7 +97,7 @@ async fn main(mut spawner: Spawner) {
     };
 
     info!("Starting continuous measurement");
-    sensor.start_continuous_measurement(&mut spawner).unwrap();
+    sensor.start_continuous_measurement(&mut spawner).await.unwrap();
 
     info!("Main task ready");
     let mut button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);

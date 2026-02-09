@@ -86,7 +86,7 @@ where
         })
     }
 
-    fn start_continuous_measurement<>(
+    async fn start_continuous_measurement<>(
         &'static mut self,
         spawner: &mut Spawner,
     ) -> Result<(), SpawnError> {
