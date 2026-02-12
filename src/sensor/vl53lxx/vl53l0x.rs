@@ -6,7 +6,7 @@ use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 use vl53l0x::*;
@@ -16,8 +16,8 @@ use vl53l0x::*;
 /// This sensor uses a shared I2C bus through a mutex, allowing multiple sensors
 /// to share the same I2C peripheral safely.
 pub struct VL53L0XSensor<'a> {
-    device: VL53L0x<'a, I2c<'static, Async, Master>, CriticalSectionRawMutex>,
-    gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
+    device: VL53L0x<'a, I2c<'static, Async, Master>, NoopRawMutex>,
+    gpio_interrupt: embassy_stm32::exti::ExtiInput<'static, Async>,
     last_data: u16,
 }
 
@@ -33,7 +33,7 @@ where
 {
     async fn init_new(
         mut config: Config,
-        i2c: &'a mut Mutex<CriticalSectionRawMutex, I2c<'static, Async, Master>>,
+        i2c: &'a mut Mutex<NoopRawMutex, I2c<'static, Async, Master>>,
     ) -> Result<Self, Error<i2c::Error>> {
         // Toggle XSHUT pin to reset the device
         debug!("  Toggling XSHUT pin...");
@@ -45,9 +45,11 @@ where
         Timer::after(Duration::from_millis(10)).await;
         debug!("  XSHUT toggled");
 
-        let mut device = VL53L0x::with_address_set(i2c, 0x30, true).await?;
+        let mut device = VL53L0x::with_address_set(i2c, 0x29, true).await?;
 
-        device.set_measurement_timing_budget(config.timing_config.timing_budget_us).await?;
+        device
+            .set_measurement_timing_budget(config.timing_config.timing_budget_us)
+            .await?;
 
         Ok(Self {
             device,
@@ -61,11 +63,10 @@ where
         spawner: &mut Spawner,
     ) -> Result<(), StartError> {
         self.device
-            .start_continuous(0).await
+            .start_continuous(0)
+            .await
             .map_err(|e| StartError::I2cError(e))?;
-        spawner
-            .spawn(distance_sensor_task(self))
-            .map_err(|e| StartError::SpawnError(e))?;
+        spawner.spawn(distance_sensor_task(self).map_err(|e| StartError::SpawnError(e))?);
         Ok(())
     }
 

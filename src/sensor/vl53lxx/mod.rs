@@ -1,5 +1,6 @@
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
+use embassy_stm32::mode::Async;
 
 pub mod vl53l1x;
 pub mod vl53l0x;
@@ -8,7 +9,7 @@ pub mod vl53l0x;
 pub struct Config {
     pub timing_config: TimingConfig,
     pub xshut_pin: Output<'static>,
-    pub gpio_interrupt: ExtiInput<'static>,
+    pub gpio_interrupt: ExtiInput<'static, Async>,
 }
 
 pub struct TimingConfig {

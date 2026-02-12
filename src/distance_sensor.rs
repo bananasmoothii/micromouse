@@ -99,7 +99,7 @@ async fn recover_sensor(
 #[embassy_executor::task]
 pub async fn distance_sensor_task(
     mut i2c: I2c<'static, Async, Master>,
-    mut gpio_interrupt: ExtiInput<'static>,
+    mut gpio_interrupt: ExtiInput<'static, Async>,
     mut xshut_pin: Output<'static>,
 ) {
     let mut dev = match init_sensor(&mut i2c, &mut xshut_pin, DistanceSensorConfig::default()).await

@@ -7,7 +7,7 @@ use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Duration, Timer};
 use vl53l1::RangeStatus::SIGNAL_FAIL;
@@ -15,8 +15,8 @@ use vl53l1::*;
 
 pub struct VL53L1XSensor<'a> {
     device: Device,
-    gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
-    i2c: &'a mut Mutex<CriticalSectionRawMutex, I2c<'static, Async, Master>>,
+    gpio_interrupt: embassy_stm32::exti::ExtiInput<'static, Async>,
+    i2c: &'a mut Mutex<NoopRawMutex, I2c<'static, Async, Master>>,
     last_data: RangingMeasurementData,
     recovery_mode: bool,
 }
@@ -28,7 +28,7 @@ where
 {
     async fn init_new(
         mut config: Config,
-        i2c: &'a mut Mutex<CriticalSectionRawMutex, I2c<'static, Async, Master>>,
+        i2c: &'a mut Mutex<NoopRawMutex, I2c<'static, Async, Master>>,
     ) -> Result<Self, Error<i2c::Error>> {
         info!("Initializing VL53L1X distance sensor");
 
@@ -90,7 +90,7 @@ where
         &'static mut self,
         spawner: &mut Spawner,
     ) -> Result<(), SpawnError> {
-        spawner.spawn(distance_sensor_task(self))
+        Ok(spawner.spawn(distance_sensor_task(self)?))
     }
 
     fn get_latest_measurement(&self) -> Result<&RangingMeasurementData, Error<i2c::Error>> {
