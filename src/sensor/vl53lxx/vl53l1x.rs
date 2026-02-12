@@ -7,8 +7,6 @@ use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
 use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l1::RangeStatus::SIGNAL_FAIL;
@@ -20,6 +18,7 @@ pub struct VL53L1XSensor {
     i2c: I,
     last_data: RangingMeasurementData,
     recovery_mode: bool,
+    one_new_measurement: Option<&'static dyn Fn(&RangingMeasurementData)>,
 }
 
 // I hate not being able to use generics due to the embassy task
@@ -85,18 +84,21 @@ where
             i2c,
             last_data: RangingMeasurementData::default(),
             recovery_mode: false,
+            one_new_measurement: None,
         })
     }
 
     async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
+        callable: &'static dyn Fn(&RangingMeasurementData),
     ) -> Result<(), SpawnError> {
+        self.one_new_measurement = Some(callable);
         spawner.spawn(distance_sensor_task(self))
     }
 
-    fn get_latest_measurement(&self) -> Result<&RangingMeasurementData, Error<i2c::Error>> {
-        Ok(&self.last_data)
+    fn get_latest_measurement(&self) -> &RangingMeasurementData {
+        &self.last_data
     }
 }
 
@@ -126,7 +128,7 @@ async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
         }
 
         // Get the ranging measurement data
-        match { get_ranging_measurement_data(&mut self_.device, &mut self_.i2c) } {
+        match get_ranging_measurement_data(&mut self_.device, &mut self_.i2c) {
             Err(e) => {
                 warn!("Error getting ranging data: {:?}", e);
                 if self_.recover_sensor().await.is_err() {
@@ -138,20 +140,23 @@ async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
             }
             Ok(rmd) => {
                 if rmd.range_status != SIGNAL_FAIL {
-                    debug!(
-                        "Distance: {} mm, Sigma: {} mm, Status: {:?}",
-                        rmd.range_milli_meter,
-                        rmd.sigma_milli_meter as f64 / 65536.0,
-                        rmd.range_status
-                    );
+                    // debug!(
+                    //     "Distance: {} mm, Sigma: {} mm, Status: {:?}",
+                    //     rmd.range_milli_meter,
+                    //     rmd.sigma_milli_meter as f64 / 65536.0,
+                    //     rmd.range_status
+                    // );
                     self_.last_data = rmd;
+                    if let Some(callback) = &self_.one_new_measurement {
+                        callback(&self_.last_data);
+                    }
                 }
             }
         }
 
         // Clear interrupt and start next measurement
         if let Err(e) =
-            { clear_interrupt_and_start_measurement(&mut self_.device, &mut self_.i2c, &mut Delay) }
+            clear_interrupt_and_start_measurement(&mut self_.device, &mut self_.i2c, &mut Delay)
         {
             warn!("Error clearing interrupt: {:?}", e);
             if self_.recover_sensor().await.is_err() {

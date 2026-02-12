@@ -1,15 +1,19 @@
 use crate::sensor::Sensor;
 use crate::sensor::vl53lxx::Config;
+use alloc::boxed::Box;
 use alloc::format;
 use core::fmt::Debug;
 use defmt::{Format, debug, warn};
 use embassy_executor::{SpawnError, Spawner};
-use embassy_stm32::i2c::Master;
+use embassy_stm32::i2c;
+use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
 use embassy_time::{Duration, Timer};
-use embedded_hal::i2c::I2c;
 use embedded_hal_bus::i2c::RefCellDevice;
+use vl53l0x::RangeStatus::SignalFail;
 use vl53l0x::*;
+use vl53l1::RangeStatus::SIGNAL_FAIL;
+use vl53l1::RangingMeasurementData;
 
 /// VL53L0X Time-of-Flight distance sensor implementation
 ///
@@ -18,7 +22,8 @@ use vl53l0x::*;
 pub struct VL53L0XSensor {
     device: VL53L0x<I>,
     gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
-    last_data: u16,
+    last_data: MeasurementData,
+    one_new_measurement: Option<&'static dyn Fn(&MeasurementData)>,
 }
 
 #[derive(Debug, Format)]
@@ -27,11 +32,26 @@ pub enum StartError {
     SpawnError(SpawnError),
 }
 
-// I hate not being able to use generics due to the embassy task
-type I = RefCellDevice<'static, embassy_stm32::i2c::I2c<'static, Async, Master>>;
-type E = embassy_stm32::i2c::Error;
+#[derive(Debug, Format)]
+pub struct MeasurementData {
+    pub distance_mm: u16,
+    pub status: RangeStatus,
+}
 
-impl<'a> Sensor<'a, I, u16, Error<E>, StartError> for VL53L0XSensor {
+impl Default for MeasurementData {
+    fn default() -> Self {
+        Self {
+            distance_mm: 0,
+            status: RangeStatus::None,
+        }
+    }
+}
+
+// I hate not being able to use generics due to the embassy task
+type I = RefCellDevice<'static, I2c<'static, Async, Master>>;
+type E = i2c::Error;
+
+impl<'a> Sensor<'a, I, MeasurementData, Error<E>, StartError> for VL53L0XSensor {
     async fn init_new(mut config: Config, i2c: I) -> Result<Self, Error<E>> {
         // Toggle XSHUT pin to reset the device
         debug!("  Toggling XSHUT pin...");
@@ -51,14 +71,17 @@ impl<'a> Sensor<'a, I, u16, Error<E>, StartError> for VL53L0XSensor {
         Ok(Self {
             device,
             gpio_interrupt: config.gpio_interrupt,
-            last_data: 0,
+            last_data: MeasurementData::default(),
+            one_new_measurement: None,
         })
     }
 
     async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
+        callable: &'static dyn Fn(&MeasurementData),
     ) -> Result<(), StartError> {
+        self.one_new_measurement = Some(callable);
         self.device
             .start_continuous(0)
             .map_err(|e| StartError::I2cError(e))?;
@@ -68,8 +91,8 @@ impl<'a> Sensor<'a, I, u16, Error<E>, StartError> for VL53L0XSensor {
         Ok(())
     }
 
-    fn get_latest_measurement(&self) -> Result<&u16, Error<E>> {
-        Ok(&self.last_data)
+    fn get_latest_measurement(&self) -> &MeasurementData {
+        &self.last_data
     }
 }
 
@@ -80,16 +103,21 @@ async fn distance_sensor_task(self_: &'static mut VL53L0XSensor) -> ! {
     loop {
         self_.gpio_interrupt.wait_for_falling_edge().await;
 
-        match self_.device.read_range_mm() {
-            Ok(distance) => {
-                self_.last_data = distance;
-                debug!("VL53L0X Distance: {} mm", distance);
+        match self_.device.get_range_with_status_blocking() {
+            Ok((distance_mm, status)) => {
+                self_.last_data = MeasurementData {
+                    distance_mm,
+                    status,
+                };
+                if status != SignalFail {
+                    // debug!("VL53L0X Distance: {} mm", distance_mm);
+                    if let Some(callback) = &self_.one_new_measurement {
+                        callback(&self_.last_data);
+                    }
+                }
             }
-            Err(nb::Error::WouldBlock) => {}
-            Err(nb::Error::Other(e)) => {
-                let s = format!("{:?}", e);
-                let s: &str = s.as_ref();
-                warn!("VL53L0X read error: {}", s);
+            Err(e) => {
+                warn!("VL53L0X read error: {}", e);
             }
         }
     }

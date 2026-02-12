@@ -95,7 +95,9 @@ async fn main(mut spawner: Spawner) {
 
     info!("Starting continuous measurement");
     sensor
-        .start_continuous_measurement(&mut spawner)
+        .start_continuous_measurement(&mut spawner, &|data| {
+            info!("New measurement: {}", data);
+        })
         .await
         .unwrap();
 
