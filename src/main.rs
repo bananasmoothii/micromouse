@@ -5,10 +5,11 @@ extern crate alloc;
 mod distance_sensor;
 mod sensor;
 
+use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::vec::Vec;
-use core::fmt::Debug;
+use core::cell::RefCell;
 use defmt::*;
 use defmt_rtt as _;
 use embassy_executor::Spawner;
@@ -18,14 +19,12 @@ use embassy_stm32::i2c;
 use embassy_stm32::i2c::I2c;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::{bind_interrupts, interrupt};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
 use embedded_alloc::LlffHeap as Heap;
+use embedded_hal_bus::i2c::RefCellDevice;
 use panic_probe as _;
 use sensor::Sensor;
 use sensor::vl53lxx::vl53l1x::VL53L1XSensor;
 use sensor::vl53lxx::{Config, TimingConfig};
-use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -63,8 +62,8 @@ async fn main(mut spawner: Spawner) {
         p.DMA1_CH0, // RX DMA
         i2c_config,
     );
-    let i2c_mutex: Mutex<CriticalSectionRawMutex, _> = Mutex::new(i2c);
-    let i2c_mutex = Box::leak(Box::new(i2c_mutex));
+    // Leak i2c_rc to get a 'static reference, required for the sensor
+    let i2c_rc = Box::leak(Box::new(RefCell::new(i2c)));
 
     // GPIO interrupt pin for VL53L1X (active low when measurement ready)
     let gpio_interrupt = ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs);
@@ -81,9 +80,7 @@ async fn main(mut spawner: Spawner) {
         gpio_interrupt,
     };
 
-    let sensor1_future = VL53L0XSensor::init_new(sensor_config, i2c_mutex);
-
-    let sensor = match sensor1_future.await {
+    let sensor = match VL53L0XSensor::init_new(sensor_config, RefCellDevice::new(i2c_rc)).await {
         Ok(s) => {
             info!("Distance sensor initialized successfully");
             Box::leak(Box::new(s))
@@ -97,7 +94,10 @@ async fn main(mut spawner: Spawner) {
     };
 
     info!("Starting continuous measurement");
-    sensor.start_continuous_measurement(&mut spawner).await.unwrap();
+    sensor
+        .start_continuous_measurement(&mut spawner)
+        .await
+        .unwrap();
 
     info!("Main task ready");
     let mut button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);

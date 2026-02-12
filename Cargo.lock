@@ -352,55 +352,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "embassy-net"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71f0aa32082b7df00164f485322d6edab59122c9718b363b07ec23424c2c06a0"
-dependencies = [
- "defmt 1.0.1",
- "document-features",
- "embassy-net-driver",
- "embassy-sync",
- "embassy-time",
- "embedded-io-async 0.7.0",
- "embedded-nal-async",
- "heapless 0.8.0",
- "managed",
- "smoltcp",
-]
-
-[[package]]
 name = "embassy-net-driver"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "524eb3c489760508f71360112bca70f6e53173e6fe48fc5f0efd0f5ab217751d"
 dependencies = [
  "defmt 0.3.100",
-]
-
-[[package]]
-name = "embassy-net-driver-channel"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7b2739fbcf6cd206ae08779c7d709087b16577d255f2ea4a45bc4bbbf305b3f"
-dependencies = [
- "embassy-futures",
- "embassy-net-driver",
- "embassy-sync",
-]
-
-[[package]]
-name = "embassy-net-wiznet"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3035678b1fcb8322bbcc3ee9a32ea3ed04e6e388528057abd11ee8382a63abdf"
-dependencies = [
- "defmt 1.0.1",
- "embassy-futures",
- "embassy-net-driver-channel",
- "embassy-time",
- "embedded-hal 1.0.0",
- "embedded-hal-async",
 ]
 
 [[package]]
@@ -507,23 +464,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embassy-usb"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc4462e48b19a4f401a11901bdd981aab80c6a826608016a0bdc73cbbab31954"
-dependencies = [
- "defmt 1.0.1",
- "embassy-futures",
- "embassy-net-driver-channel",
- "embassy-sync",
- "embassy-usb-driver",
- "embedded-io-async 0.6.1",
- "heapless 0.8.0",
- "ssmarshal",
- "usbd-hid 0.8.2",
-]
-
-[[package]]
 name = "embassy-usb-driver"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -581,6 +521,9 @@ name = "embedded-hal"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+dependencies = [
+    "defmt 0.3.100",
+]
 
 [[package]]
 name = "embedded-hal-async"
@@ -588,19 +531,20 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
 dependencies = [
+    "defmt 0.3.100",
  "embedded-hal 1.0.0",
 ]
 
 [[package]]
 name = "embedded-hal-bus"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d3980bf28e8577db59fe2bdb3df868a419469d2cecb363644eea2b6f7797669"
+checksum = "513e0b3a8fb7d3013a8ae17a834283f170deaf7d0eeab0a7c1a36ad4dd356d22"
 dependencies = [
  "critical-section",
+    "defmt 0.3.100",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
- "portable-atomic",
 ]
 
 [[package]]
@@ -645,25 +589,6 @@ checksum = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0"
 dependencies = [
  "defmt 1.0.1",
  "embedded-io 0.7.1",
-]
-
-[[package]]
-name = "embedded-nal"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c56a28be191a992f28f178ec338a0bf02f63d7803244add736d026a471e6ed77"
-dependencies = [
- "nb 1.1.0",
-]
-
-[[package]]
-name = "embedded-nal-async"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb5a1bd585135d302f8f6d7de329310938093da6271b37a6c94b8798795c0c6d"
-dependencies = [
- "embedded-io-async 0.7.0",
- "embedded-nal",
 ]
 
 [[package]]
@@ -747,7 +672,6 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
- "defmt 0.3.100",
  "hash32",
  "stable_deref_trait",
 ]
@@ -793,12 +717,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
-name = "managed"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
-
-[[package]]
 name = "micromath"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -815,26 +733,23 @@ dependencies = [
  "defmt 1.0.1",
  "defmt-rtt",
  "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-net-wiznet",
  "embassy-stm32",
  "embassy-sync",
  "embassy-time",
- "embassy-usb",
  "embedded-alloc",
  "embedded-hal 1.0.0",
+    "embedded-hal-async",
  "embedded-hal-bus",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "embedded-storage",
  "futures-util",
- "heapless 0.8.0",
+    "heapless 0.9.2",
  "micromath",
  "nb 1.1.0",
  "panic-probe",
  "static_cell",
- "usbd-hid 0.9.0",
+    "usbd-hid",
  "vl53l0x",
  "vl53l1",
 ]
@@ -1021,20 +936,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "smoltcp"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dad095989c1533c1c266d9b1e8d70a1329dd3723c3edac6d03bbd67e7bf6f4bb"
-dependencies = [
- "bitflags 1.3.2",
- "byteorder",
- "cfg-if",
- "defmt 0.3.100",
- "heapless 0.8.0",
- "managed",
-]
-
-[[package]]
 name = "ssmarshal"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1181,18 +1082,6 @@ dependencies = [
 
 [[package]]
 name = "usbd-hid"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6f291ab53d428685cc780f08a2eb9d5d6ff58622db2b36e239a4f715f1e184c"
-dependencies = [
- "serde",
- "ssmarshal",
- "usb-device",
- "usbd-hid-macros 0.8.2",
-]
-
-[[package]]
-name = "usbd-hid"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a7cd3bfb2bb57779f2aeab3f679e5ec6c80265adfe77894539792be7c22aaf0"
@@ -1200,16 +1089,7 @@ dependencies = [
  "serde",
  "ssmarshal",
  "usb-device",
- "usbd-hid-macros 0.9.0",
-]
-
-[[package]]
-name = "usbd-hid-descriptors"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0eee54712c5d778d2fb2da43b1ce5a7b5060886ef7b09891baeb4bf36910a3ed"
-dependencies = [
- "bitfield 0.14.0",
+    "usbd-hid-macros",
 ]
 
 [[package]]
@@ -1219,22 +1099,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac781e4d4c61a4d3bea4cda03fb4ed4d13578c55386b29c5cdc70b3bd89c47df"
 dependencies = [
  "bitfield 0.14.0",
-]
-
-[[package]]
-name = "usbd-hid-macros"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb573c76e7884035ac5e1ab4a81234c187a82b6100140af0ab45757650ccda38"
-dependencies = [
- "byteorder",
- "hashbrown",
- "log",
- "proc-macro2",
- "quote",
- "serde",
- "syn 1.0.109",
- "usbd-hid-descriptors 0.8.2",
 ]
 
 [[package]]
@@ -1250,7 +1114,7 @@ dependencies = [
  "quote",
  "serde",
  "syn 1.0.109",
- "usbd-hid-descriptors 0.9.0",
+    "usbd-hid-descriptors",
 ]
 
 [[package]]
@@ -1268,12 +1132,11 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vl53l0x"
 version = "1.0.1"
-source = "git+https://github.com/bananasmoothii/vl53l0x#7e09be313b8d325c13561a5e274d37be7b0c30ad"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e943add0e260b9f7030223a74bf30d8bb020747a4a3472c281bab1562046f078"
 dependencies = [
- "embassy-sync",
  "embedded-hal 1.0.0",
- "embedded-hal-async",
- "nb 1.1.0",
+    "nb 0.1.3",
 ]
 
 [[package]]

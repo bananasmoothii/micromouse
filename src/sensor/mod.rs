@@ -1,20 +1,17 @@
 use crate::sensor::vl53lxx::Config;
 use defmt::Format;
 use embassy_executor::Spawner;
-use embassy_stm32::i2c::{I2c, Master};
-use embassy_stm32::mode::Async;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
+use embedded_hal::i2c::I2c;
 
 pub mod vl53lxx;
 
-pub trait Sensor<'a, M: Format, E, StartError: Format>: Sized {
-    async fn init_new(
-        config: Config,
-        i2c: &'a mut Mutex<CriticalSectionRawMutex, I2c<'static, Async, Master>>,
-    ) -> Result<Self, E>;
+pub trait Sensor<'a, I: I2c, M: Format, E, StartError: Format>: Sized {
+    async fn init_new(config: Config, i2c: I) -> Result<Self, E>;
 
-    async fn start_continuous_measurement(&'static mut self, spawner: &mut Spawner) -> Result<(), StartError>;
+    async fn start_continuous_measurement(
+        &'static mut self,
+        spawner: &mut Spawner,
+    ) -> Result<(), StartError>;
 
     fn get_latest_measurement(&self) -> Result<&M, E>;
 }
