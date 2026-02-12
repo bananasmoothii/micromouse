@@ -2,7 +2,6 @@ use crate::sensor::vl53lxx::Config;
 use defmt::Format;
 use embassy_executor::Spawner;
 use embedded_hal::i2c::I2c;
-use vl53l1::RangingMeasurementData;
 
 pub mod vl53lxx;
 

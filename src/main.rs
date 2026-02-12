@@ -2,7 +2,6 @@
 #![no_main]
 extern crate alloc;
 
-mod distance_sensor;
 mod sensor;
 
 use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;

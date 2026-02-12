@@ -1,7 +1,5 @@
 use crate::sensor::Sensor;
 use crate::sensor::vl53lxx::Config;
-use alloc::boxed::Box;
-use alloc::format;
 use core::fmt::Debug;
 use defmt::{Format, debug, warn};
 use embassy_executor::{SpawnError, Spawner};
@@ -12,8 +10,6 @@ use embassy_time::{Duration, Timer};
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l0x::RangeStatus::SignalFail;
 use vl53l0x::*;
-use vl53l1::RangeStatus::SIGNAL_FAIL;
-use vl53l1::RangingMeasurementData;
 
 /// VL53L0X Time-of-Flight distance sensor implementation
 ///
