@@ -1132,7 +1132,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vl53l0x"
 version = "1.0.1"
-source = "git+https://github.com/bananasmoothii/vl53l0x?rev=84a0cae#84a0caeaa4c881921a7c0fbeddfa19452455c3a0"
+source = "git+https://github.com/bananasmoothii/vl53l0x?rev=042f41d#042f41d7f57addfc76aa498ea9ac435f097c30e8"
 dependencies = [
  "defmt 1.0.1",
  "embedded-hal 1.0.0",

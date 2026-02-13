@@ -46,7 +46,7 @@ chip_descriptions = []
 #   If not set, the `RUST_LOG` environment variable will be used.
 # log_level = "WARN"
 # Use this flag to assert the nreset & ntrst pins during attaching the probe to the chip.
-connect_under_reset = true
+connect_under_reset = false
 
 [default.rtt]
 # Whether or not an RTTUI should be opened after flashing.
