@@ -6,7 +6,6 @@ mod sensor;
 
 use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;
 use alloc::boxed::Box;
-use alloc::format;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use defmt::*;
@@ -27,13 +26,15 @@ use sensor::vl53lxx::{Config, TimingConfig};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
+const HEAP_SIZE: usize = size_of::<VL53L0XSensor>() + size_of::<VL53L1XSensor>() + 500;
 
 bind_interrupts!(
     pub struct Irqs {
         // used for button input
         EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
-        // used for gpio input (VL53L1X interrupt)
+        // used for gpio input (VL53LXX interrupt)
         EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
+        EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
         // I2C1 interrupts
         I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
         I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
@@ -42,8 +43,9 @@ bind_interrupts!(
 
 #[embassy_executor::main]
 async fn main(mut spawner: Spawner) {
+    println!("Allocating heap, size: {} bytes", HEAP_SIZE);
     unsafe {
-        embedded_alloc::init!(HEAP, 1024);
+        embedded_alloc::init!(HEAP, HEAP_SIZE);
     }
 
     let p = embassy_stm32::init(Default::default());
@@ -64,38 +66,65 @@ async fn main(mut spawner: Spawner) {
     // Leak i2c_rc to get a 'static reference, required for the sensor
     let i2c_rc = Box::leak(Box::new(RefCell::new(i2c)));
 
-    // GPIO interrupt pin for VL53L1X (active low when measurement ready)
-    let gpio_interrupt = ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs);
-
-    // XSHUT pin for VL53L1X (active low to disable sensor)
-    let xshut_pin = Output::new(p.PA4, Level::Low, Speed::Low);
-
     // Initialize the distance sensor using the trait-based API
-    info!("Initializing distance sensor");
+    info!("Initializing distance sensors...");
 
-    let sensor_config = Config {
-        timing_config: TimingConfig::default(),
-        xshut_pin,
-        gpio_interrupt,
-    };
+    let xshut0 = Output::new(p.PC9, Level::Low, Speed::Low);
+    let xshut1 = Output::new(p.PC8, Level::Low, Speed::Low);
 
-    let sensor = match VL53L0XSensor::init_new(sensor_config, RefCellDevice::new(i2c_rc)).await {
+    let sensor0 = VL53L0XSensor::init_new(
+        Config {
+            timing_config: TimingConfig::default(),
+            xshut_pin: xshut0,
+            gpio_interrupt: ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs),
+        },
+        RefCellDevice::new(i2c_rc),
+    )
+        .await;
+
+    let sensor1 = VL53L1XSensor::init_new(
+        Config {
+            timing_config: TimingConfig::default(),
+            xshut_pin: xshut1,
+            gpio_interrupt: ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs),
+        },
+        RefCellDevice::new(i2c_rc),
+    )
+        .await;
+
+    let sensor0 = match sensor0 {
         Ok(s) => {
-            info!("Distance sensor initialized successfully");
+            info!("Distance sensor 0 initialized successfully");
             Box::leak(Box::new(s))
         }
         Err(e) => {
-            let s = format!("{:?}", e);
-            let s: &str = s.as_ref();
-            error!("Failed to initialize distance sensor: {}", s);
+            error!("Failed to initialize distance 0 sensor: {}", e);
+            core::panic!("Sensor initialization failed");
+        }
+    };
+
+    let sensor1 = match sensor1 {
+        Ok(s) => {
+            info!("Distance sensor 1 initialized successfully");
+            Box::leak(Box::new(s))
+        }
+        Err(e) => {
+            error!("Failed to initialize distance 1 sensor: {}", e);
             core::panic!("Sensor initialization failed");
         }
     };
 
     info!("Starting continuous measurement");
-    sensor
+    sensor0
         .start_continuous_measurement(&mut spawner, &|data| {
-            info!("New measurement: {}", data);
+            info!("New measurement: {} mm {}", data.distance_mm, data.status);
+        })
+        .await
+        .unwrap();
+
+    sensor1
+        .start_continuous_measurement(&mut spawner, &|data| {
+            info!("New measurement: {} mm {} σ={}", data.range_milli_meter, data.range_status, data.sigma_milli_meter);
         })
         .await
         .unwrap();
