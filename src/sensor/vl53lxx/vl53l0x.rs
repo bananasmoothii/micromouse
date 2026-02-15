@@ -8,7 +8,7 @@ use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
 use embassy_time::{Duration, Timer};
 use embedded_hal_bus::i2c::RefCellDevice;
-use vl53l0x::RangeStatus::SignalFail;
+use vl53l0x::RangeStatus::{PhaseFail, SignalFail};
 use vl53l0x::*;
 
 /// VL53L0X Time-of-Flight distance sensor implementation
@@ -105,7 +105,7 @@ async fn distance_sensor_task(self_: &'static mut VL53L0XSensor) -> ! {
                     distance_mm,
                     status,
                 };
-                if status != SignalFail {
+                if status != SignalFail && status != PhaseFail {
                     // debug!("VL53L0X Distance: {} mm", distance_mm);
                     if let Some(callback) = &self_.one_new_measurement {
                         callback(&self_.last_data);
