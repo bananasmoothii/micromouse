@@ -38,6 +38,8 @@ chrono = { version = "^0.4", default-features = false }
 vl53l1 = { git = "https://github.com/bananasmoothii/vl53l1", features = ["defmt"] }
 vl53l0x = { git = "https://github.com/bananasmoothii/vl53l0x", rev = "042f41d", features = ["defmt"] }
 
+mpu9250 = { git = "https://github.com/bananasmoothii/mpu9250-forked", rev = "4bc31c80", features = ["defmt"] }
+
 [profile.release]
 debug = 2
 

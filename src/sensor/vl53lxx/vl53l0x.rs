@@ -19,7 +19,7 @@ pub struct VL53L0XSensor {
     device: VL53L0x<I>,
     gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
     last_data: MeasurementData,
-    one_new_measurement: Option<&'static dyn Fn(&MeasurementData)>,
+    on_new_measurement: Option<&'static dyn Fn(&MeasurementData)>,
 }
 
 #[derive(Debug, Format)]
@@ -47,8 +47,8 @@ impl Default for MeasurementData {
 type I = RefCellDevice<'static, I2c<'static, Async, Master>>;
 type E = i2c::Error;
 
-impl<'a> Sensor<'a, I, MeasurementData, Error<E>, StartError> for VL53L0XSensor {
-    async fn init_new(mut config: Config, i2c: I) -> Result<Self, Error<E>> {
+impl VL53L0XSensor {
+    pub(crate) async fn init_new(mut config: Config, i2c: I) -> Result<Self, Error<E>> {
         // Toggle XSHUT pin to reset the device
         debug!("  Toggling XSHUT pin...");
         config.xshut_pin.set_low();
@@ -68,16 +68,18 @@ impl<'a> Sensor<'a, I, MeasurementData, Error<E>, StartError> for VL53L0XSensor 
             device,
             gpio_interrupt: config.gpio_interrupt,
             last_data: MeasurementData::default(),
-            one_new_measurement: None,
+            on_new_measurement: None,
         })
     }
+}
 
+impl Sensor<MeasurementData, StartError> for VL53L0XSensor {
     async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
         callable: &'static dyn Fn(&MeasurementData),
     ) -> Result<(), StartError> {
-        self.one_new_measurement = Some(callable);
+        self.on_new_measurement = Some(callable);
         self.device
             .start_continuous(0)
             .map_err(|e| StartError::I2cError(e))?;
@@ -107,9 +109,10 @@ async fn distance_sensor_task(self_: &'static mut VL53L0XSensor) -> ! {
                 };
                 if status != SignalFail && status != PhaseFail {
                     // debug!("VL53L0X Distance: {} mm", distance_mm);
-                    if let Some(callback) = &self_.one_new_measurement {
-                        callback(&self_.last_data);
-                    }
+                    self_.on_new_measurement.unwrap()(&self_.last_data);
+                    // if let Some(callback) = &self_.on_new_measurement {
+                    //     callback(&self_.last_data);
+                    // }
                 }
             }
             Err(e) => {

@@ -2,42 +2,39 @@
 #![no_main]
 extern crate alloc;
 
+mod i2c_devices;
 mod sensor;
 
+use crate::i2c_devices::init_i2c_devices;
+use crate::sensor::mpu9250::Mpu9250Sensor;
 use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;
-use alloc::boxed::Box;
+use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::RefCell;
 use defmt::*;
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::exti::{self, ExtiInput};
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
-use embassy_stm32::i2c;
-use embassy_stm32::i2c::I2c;
-use embassy_stm32::time::Hertz;
+use embassy_stm32::peripherals::I2C1;
 use embassy_stm32::{bind_interrupts, interrupt};
+use embassy_stm32::{i2c, spi};
 use embedded_alloc::LlffHeap as Heap;
-use embedded_hal_bus::i2c::RefCellDevice;
 use panic_probe as _;
-use sensor::Sensor;
 use sensor::vl53lxx::vl53l1x::VL53L1XSensor;
-use sensor::vl53lxx::{Config, TimingConfig};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
-const HEAP_SIZE: usize = size_of::<VL53L0XSensor>() + size_of::<VL53L1XSensor>() + 500;
+const HEAP_SIZE: usize = // Add all big structs here !
+    size_of::<VL53L0XSensor>() + size_of::<VL53L1XSensor>() + size_of::<Mpu9250Sensor>() + 500;
 
 bind_interrupts!(
-    pub struct Irqs {
-        // used for button input
+    struct Irqs {
         EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
-        // used for gpio input (VL53LXX interrupt)
         EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
         EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
-        // I2C1 interrupts
-        I2C1_EV => i2c::EventInterruptHandler<embassy_stm32::peripherals::I2C1>;
-        I2C1_ER => i2c::ErrorInterruptHandler<embassy_stm32::peripherals::I2C1>;
+        EXTI2 => exti::InterruptHandler<interrupt::typelevel::EXTI2>;
+        I2C1_EV => i2c::EventInterruptHandler<I2C1>;
+        I2C1_ER => i2c::ErrorInterruptHandler<I2C1>;
     }
 );
 
@@ -50,89 +47,94 @@ async fn main(mut spawner: Spawner) {
 
     let p = embassy_stm32::init(Default::default());
 
-    let mut i2c_config = i2c::Config::default();
-    // Use 100kHz for more reliable communication
-    i2c_config.frequency = Hertz::khz(200);
-    i2c_config.gpio_speed = Speed::High;
+    init_i2c_devices(
+        &mut spawner,
+        p.I2C1,
+        p.PB8,
+        p.PB9,
+        p.DMA1_CH6,
+        p.DMA1_CH0,
+        Irqs,
+        vec![
+            Output::new(p.PC9, Level::Low, Speed::Low),
+            Output::new(p.PC8, Level::Low, Speed::Low),
+        ],
+        vec![
+            ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs),
+            ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs),
+        ],
+    )
+        .await;
 
-    // I2C needs to be leaked to get a 'static reference for the sensor
-    let i2c = I2c::new(
-        p.I2C1, p.PB8, // SCL
-        p.PB9, // SDA
-        Irqs, p.DMA1_CH6, // TX DMA
-        p.DMA1_CH0, // RX DMA
-        i2c_config,
+    /*
+    info!("Configuring SPI...");
+    let mut spi_config = spi::Config::default();
+    spi_config.frequency = Hertz::khz(100); // Start with 100kHz for maximum reliability
+    // MPU9250 library requires Mode 3 (CPOL=1, CPHA=1)
+    // This matches mpu9250::MODE constant: IdleHigh, CaptureOnSecondTransition
+    spi_config.mode = spi::Mode {
+        polarity: spi::Polarity::IdleHigh,
+        phase: spi::Phase::CaptureOnSecondTransition,
+    };
+
+    info!("Creating SPI with MISO pull-down...");
+    let spi = Spi::new(
+        p.SPI1,     //
+        p.PB3,      // SCK
+        p.PB5,      // MOSI / SDA
+        p.PB4,      // MISO (with internal pull-down to prevent floating)
+        p.DMA2_CH3, //
+        p.DMA2_CH2, //
+        spi_config,
     );
-    // Leak i2c_rc to get a 'static reference, required for the sensor
-    let i2c_rc = Box::leak(Box::new(RefCell::new(i2c)));
 
-    // Initialize the distance sensor using the trait-based API
-    info!("Initializing distance sensors...");
+    info!("Setting up chip select (CS)...");
+    let mut chip_select = Output::new(p.PC6, Level::High, Speed::Medium);
+    let interrupt = ExtiInput::new(p.PA2, p.EXTI2, Pull::None, Irqs);
 
-    let xshut0 = Output::new(p.PC9, Level::Low, Speed::Low);
-    let xshut1 = Output::new(p.PC8, Level::Low, Speed::Low);
+    // MPU9250 requires CS to be high during power-on to enable SPI mode
+    // Pulse CS to ensure the chip recognizes SPI mode
+    info!("Pulsing CS to enable SPI mode...");
+    chip_select.set_high();
+    embassy_time::Timer::after(embassy_time::Duration::from_millis(50)).await;
+    chip_select.set_low();
+    embassy_time::Timer::after(embassy_time::Duration::from_micros(100)).await;
+    chip_select.set_high();
+    embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
-    let sensor0 = VL53L0XSensor::init_new(
-        Config {
-            timing_config: TimingConfig::default(),
-            xshut_pin: xshut0,
-            gpio_interrupt: ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs),
-        },
-        RefCellDevice::new(i2c_rc),
-    )
-        .await;
+    info!("Initializing MPU9250 IMU...");
 
-    let sensor1 = VL53L1XSensor::init_new(
-        Config {
-            timing_config: TimingConfig::default(),
-            xshut_pin: xshut1,
-            gpio_interrupt: ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs),
-        },
-        RefCellDevice::new(i2c_rc),
-    )
-        .await;
-
-    let sensor0 = match sensor0 {
+    let imu =
+        Mpu9250Sensor::init_new(spi, chip_select, interrupt);
+    let imu = match imu {
         Ok(s) => {
-            info!("Distance sensor 0 initialized successfully");
+            info!("IMU initialized successfully");
             Box::leak(Box::new(s))
         }
         Err(e) => {
-            error!("Failed to initialize distance 0 sensor: {}", e);
+            error!("Failed to initialize IMU: {}", e);
             core::panic!("Sensor initialization failed");
         }
     };
+    */
 
-    let sensor1 = match sensor1 {
-        Ok(s) => {
-            info!("Distance sensor 1 initialized successfully");
-            Box::leak(Box::new(s))
-        }
-        Err(e) => {
-            error!("Failed to initialize distance 1 sensor: {}", e);
-            core::panic!("Sensor initialization failed");
-        }
-    };
+    // imu.start_continuous_measurement(&mut spawner, &|data| {
+    //     info!(
+    //         "New IMU data: Accel: {:?}, Gyro: {:?}, Mag: {:?}, Temp: {}",
+    //         data.accel, data.gyro, data.mag, data.temp
+    //     );
+    // })
+    // .await
+    // .unwrap();
 
-    info!("Starting continuous measurement");
-    sensor0
-        .start_continuous_measurement(&mut spawner, &|data| {
-            info!("New measurement: {} mm {}", data.distance_mm, data.status);
-        })
-        .await
-        .unwrap();
+    let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
+    let led = Output::new(p.PA5, Level::Low, Speed::Medium);
 
-    sensor1
-        .start_continuous_measurement(&mut spawner, &|data| {
-            info!("New measurement: {} mm {} σ={}", data.range_milli_meter, data.range_status, data.sigma_milli_meter);
-        })
-        .await
-        .unwrap();
+    button_task(user_button, led).await;
+}
 
+async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
     info!("Main task ready");
-    let mut button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
-    let mut led = Output::new(p.PA5, Level::Low, Speed::Medium);
-
     let mut toggle_led = || {
         led.toggle();
     };

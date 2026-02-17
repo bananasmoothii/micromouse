@@ -18,19 +18,15 @@ pub struct VL53L1XSensor {
     i2c: I,
     last_data: RangingMeasurementData,
     recovery_mode: bool,
-    one_new_measurement: Option<&'static dyn Fn(&RangingMeasurementData)>,
+    on_new_measurement: Option<&'static dyn Fn(&RangingMeasurementData)>,
 }
 
 // I hate not being able to use generics due to the embassy task
 type I = RefCellDevice<'static, I2c<'static, Async, Master>>;
 type E = i2c::Error;
 
-// Step 1: Implement the base Sensor trait
-impl<'a> Sensor<'a, I, RangingMeasurementData, Error<E>, SpawnError> for VL53L1XSensor
-where
-    Self: Sized,
-{
-    async fn init_new(mut config: Config, mut i2c: I) -> Result<Self, Error<i2c::Error>> {
+impl VL53L1XSensor {
+    pub(crate) async fn init_new(mut config: Config, mut i2c: I) -> Result<Self, Error<i2c::Error>> {
         info!("Initializing VL53L1X distance sensor");
 
         // Toggle XSHUT pin to reset the device
@@ -84,16 +80,29 @@ where
             i2c,
             last_data: RangingMeasurementData::default(),
             recovery_mode: false,
-            one_new_measurement: None,
+            on_new_measurement: None,
         })
     }
 
+    /// Attempt to recover from a sensor error by stopping and restarting measurements
+    async fn recover_sensor(&mut self) -> Result<(), Error<i2c::Error>> {
+        info!("  Attempting sensor recovery...");
+        stop_measurement(&mut self.device, &mut self.i2c)?;
+        Timer::after(Duration::from_millis(100)).await;
+        start_measurement(&mut self.device, &mut self.i2c)?;
+        info!("  Sensor recovered");
+        Ok(())
+    }
+}
+
+// Step 1: Implement the base Sensor trait
+impl Sensor<RangingMeasurementData, SpawnError> for VL53L1XSensor {
     async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
         callable: &'static dyn Fn(&RangingMeasurementData),
     ) -> Result<(), SpawnError> {
-        self.one_new_measurement = Some(callable);
+        self.on_new_measurement = Some(callable);
         spawner.spawn(distance_sensor_task(self))
     }
 
@@ -147,9 +156,10 @@ async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
                     //     rmd.range_status
                     // );
                     self_.last_data = rmd;
-                    if let Some(callback) = &self_.one_new_measurement {
-                        callback(&self_.last_data);
-                    }
+                    self_.on_new_measurement.unwrap()(&self_.last_data);
+                    // if let Some(callback) = &self_.on_new_measurement {
+                    //     callback(&self_.last_data);
+                    // }
                 }
             }
         }
@@ -165,18 +175,6 @@ async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
                 self_.recovery_mode = true;
             }
         }
-    }
-}
-
-impl VL53L1XSensor {
-    /// Attempt to recover from a sensor error by stopping and restarting measurements
-    async fn recover_sensor(&mut self) -> Result<(), Error<i2c::Error>> {
-        info!("  Attempting sensor recovery...");
-        stop_measurement(&mut self.device, &mut self.i2c)?;
-        Timer::after(Duration::from_millis(100)).await;
-        start_measurement(&mut self.device, &mut self.i2c)?;
-        info!("  Sensor recovered");
-        Ok(())
     }
 }
 
