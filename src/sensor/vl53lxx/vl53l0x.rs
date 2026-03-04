@@ -1,12 +1,13 @@
 use crate::sensor::Sensor;
 use crate::sensor::vl53lxx::Config;
 use core::fmt::Debug;
-use defmt::{Format, debug, warn};
+use defmt::{Format, debug, warn, trace};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
 use embassy_time::{Duration, Timer};
+use embedded_hal::i2c::I2c as _;
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l0x::RangeStatus::{PhaseFail, SignalFail};
 use vl53l0x::*;
@@ -100,6 +101,7 @@ async fn distance_sensor_task(self_: &'static mut VL53L0XSensor) -> ! {
 
     loop {
         self_.gpio_interrupt.wait_for_falling_edge().await;
+        // trace!("GPIO interrupt received, reading distance...");
 
         match self_.device.get_range_with_status_blocking() {
             Ok((distance_mm, status)) => {
@@ -108,7 +110,7 @@ async fn distance_sensor_task(self_: &'static mut VL53L0XSensor) -> ! {
                     status,
                 };
                 if status != SignalFail && status != PhaseFail {
-                    // debug!("VL53L0X Distance: {} mm", distance_mm);
+                    debug!("VL53L0X Distance: {} mm", distance_mm);
                     self_.on_new_measurement.unwrap()(&self_.last_data);
                     // if let Some(callback) = &self_.on_new_measurement {
                     //     callback(&self_.last_data);
@@ -117,6 +119,19 @@ async fn distance_sensor_task(self_: &'static mut VL53L0XSensor) -> ! {
             }
             Err(e) => {
                 warn!("VL53L0X read error: {}", e);
+                if let Err(e) = self_.device.clear_interrupt_status() {
+                    warn!("Failed to clear VL53L0X interrupt status: {}", e);
+                    if let i2c::Error::Timeout = e {
+                        warn!("I2C timeout detected, attempting recovery...");
+                        // I2C specification chapter 3.1.16 Bus Clear
+                        // If the data line (SDA) is stuck LOW, the controller should send nine clock
+                        // pulses. The device that held the bus LOW should release it sometime within
+                        // those nine clocks. If not, then use the HW reset or cycle power to clear the
+                        // bus
+                        self_.device.com.write(0, &[0]).unwrap();
+                        Timer::after(Duration::from_millis(100)).await;
+                    }
+                }
             }
         }
     }

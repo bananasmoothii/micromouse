@@ -5,6 +5,7 @@ extern crate alloc;
 mod i2c_devices;
 mod sensor;
 
+use alloc::boxed::Box;
 use crate::i2c_devices::init_i2c_devices;
 use crate::sensor::mpu9250::Mpu9250Sensor;
 use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;
@@ -18,9 +19,12 @@ use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::peripherals::I2C1;
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
+use embassy_stm32::spi::Spi;
+use embassy_stm32::time::Hertz;
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
 use sensor::vl53lxx::vl53l1x::VL53L1XSensor;
+use crate::sensor::Sensor;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -66,10 +70,8 @@ async fn main(mut spawner: Spawner) {
     )
         .await;
 
-    /*
     info!("Configuring SPI...");
     let mut spi_config = spi::Config::default();
-    spi_config.frequency = Hertz::khz(100); // Start with 100kHz for maximum reliability
     // MPU9250 library requires Mode 3 (CPOL=1, CPHA=1)
     // This matches mpu9250::MODE constant: IdleHigh, CaptureOnSecondTransition
     spi_config.mode = spi::Mode {
@@ -95,10 +97,8 @@ async fn main(mut spawner: Spawner) {
     // MPU9250 requires CS to be high during power-on to enable SPI mode
     // Pulse CS to ensure the chip recognizes SPI mode
     info!("Pulsing CS to enable SPI mode...");
-    chip_select.set_high();
-    embassy_time::Timer::after(embassy_time::Duration::from_millis(50)).await;
     chip_select.set_low();
-    embassy_time::Timer::after(embassy_time::Duration::from_micros(100)).await;
+    embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
     chip_select.set_high();
     embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
@@ -116,16 +116,15 @@ async fn main(mut spawner: Spawner) {
             core::panic!("Sensor initialization failed");
         }
     };
-    */
 
-    // imu.start_continuous_measurement(&mut spawner, &|data| {
-    //     info!(
-    //         "New IMU data: Accel: {:?}, Gyro: {:?}, Mag: {:?}, Temp: {}",
-    //         data.accel, data.gyro, data.mag, data.temp
-    //     );
-    // })
-    // .await
-    // .unwrap();
+    imu.start_continuous_measurement(&mut spawner, &|data| {
+        info!(
+            "New IMU data: Accel: {:?}, Gyro: {:?}, Mag: {:?}, Temp: {}",
+            data.accel, data.gyro, data.mag, data.temp
+        );
+    })
+        .await
+        .unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);

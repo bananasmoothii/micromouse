@@ -1,13 +1,12 @@
 use crate::sensor::Sensor;
 use crate::sensor::vl53lxx::{Config, MeasurementData};
-use alloc::format;
-use alloc::string::String;
-use defmt::{debug, error, info, warn};
+use defmt::{debug, info, trace, warn};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
 use embassy_time::{Delay, Duration, Timer};
+use embedded_hal::i2c::I2c as _;
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l1::RangeStatus::SIGNAL_FAIL;
 use vl53l1::*;
@@ -26,7 +25,10 @@ type I = RefCellDevice<'static, I2c<'static, Async, Master>>;
 type E = i2c::Error;
 
 impl VL53L1XSensor {
-    pub(crate) async fn init_new(mut config: Config, mut i2c: I) -> Result<Self, Error<i2c::Error>> {
+    pub(crate) async fn init_new(
+        mut config: Config,
+        mut i2c: I,
+    ) -> Result<Self, Error<i2c::Error>> {
         info!("Initializing VL53L1X distance sensor");
 
         // Toggle XSHUT pin to reset the device
@@ -114,39 +116,76 @@ impl Sensor<RangingMeasurementData, SpawnError> for VL53L1XSensor {
 #[embassy_executor::task]
 async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
     debug!("Distance sensor task running");
+    /*
+       loop {
+           if !self_.recovery_mode {
+               self_.gpio_interrupt.wait_for_falling_edge().await;
+           } else {
+               while let Err(e) =
+                   wait_measurement_data_ready(&mut self_.device, &mut self_.i2c, &mut Delay)
+               {
+                   let str = match e {
+                       nb::Error::Other(e) => format!("other error: {:?}", e),
+                       nb::Error::WouldBlock => String::from("Operation would block"),
+                   };
+                   warn!(
+                       "Waiting for measurement data ready failed ({}), retrying...",
+                       str.as_str()
+                   );
+                   Timer::after(Duration::from_millis(10)).await;
+               }
+               info!("Measurement data ready after recovery");
+               self_.recovery_mode = false;
+           }
 
+           // Get the ranging measurement data
+           match get_ranging_measurement_data(&mut self_.device, &mut self_.i2c) {
+               Err(e) => {
+                   warn!("Error getting ranging data: {:?}", e);
+                   if self_.recover_sensor().await.is_err() {
+                       error!("Failed to recover sensor, waiting before retry...");
+                       self_.recovery_mode = true;
+                       Timer::after(Duration::from_millis(500)).await;
+                   }
+                   continue;
+               }
+               Ok(rmd) => {
+                   if rmd.range_status != SIGNAL_FAIL {
+                       // debug!(
+                       //     "Distance: {} mm, Sigma: {} mm, Status: {:?}",
+                       //     rmd.range_milli_meter,
+                       //     rmd.sigma_milli_meter as f64 / 65536.0,
+                       //     rmd.range_status
+                       // );
+                       self_.last_data = rmd;
+                       self_.on_new_measurement.unwrap()(&self_.last_data);
+                       // if let Some(callback) = &self_.on_new_measurement {
+                       //     callback(&self_.last_data);
+                       // }
+                   }
+               }
+           }
+
+           // Clear interrupt and start next measurement
+           if let Err(e) =
+               clear_interrupt_and_start_measurement(&mut self_.device, &mut self_.i2c, &mut Delay)
+           {
+               warn!("Error clearing interrupt: {:?}", e);
+               if self_.recover_sensor().await.is_err() {
+                   error!("Failed to recover sensor, waiting before retry...");
+                   Timer::after(Duration::from_millis(500)).await;
+                   self_.recovery_mode = true;
+               }
+           }
+       }
+
+    */
     loop {
-        if !self_.recovery_mode {
-            self_.gpio_interrupt.wait_for_falling_edge().await;
-        } else {
-            while let Err(e) =
-                wait_measurement_data_ready(&mut self_.device, &mut self_.i2c, &mut Delay)
-            {
-                let str = match e {
-                    nb::Error::Other(e) => format!("other error: {:?}", e),
-                    nb::Error::WouldBlock => String::from("Operation would block"),
-                };
-                warn!(
-                    "Waiting for measurement data ready failed ({}), retrying...",
-                    str.as_str()
-                );
-                Timer::after(Duration::from_millis(10)).await;
-            }
-            info!("Measurement data ready after recovery");
-            self_.recovery_mode = false;
-        }
+        self_.gpio_interrupt.wait_for_falling_edge().await;
+        // trace!("GPIO interrupt received, reading distance...");
 
         // Get the ranging measurement data
         match get_ranging_measurement_data(&mut self_.device, &mut self_.i2c) {
-            Err(e) => {
-                warn!("Error getting ranging data: {:?}", e);
-                if self_.recover_sensor().await.is_err() {
-                    error!("Failed to recover sensor, waiting before retry...");
-                    self_.recovery_mode = true;
-                    Timer::after(Duration::from_millis(500)).await;
-                }
-                continue;
-            }
             Ok(rmd) => {
                 if rmd.range_status != SIGNAL_FAIL {
                     // debug!(
@@ -162,6 +201,25 @@ async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
                     // }
                 }
             }
+            Err(e) => {
+                warn!("Error getting ranging data: {:?}", e);
+                // if self_.recover_sensor().await.is_err() {
+                //     error!("Failed to recover sensor, waiting before retry...");
+                //     self_.recovery_mode = true;
+                //     Timer::after(Duration::from_millis(500)).await;
+                // }
+                if let Error::I2c(i2c::Error::Timeout) = e {
+                    warn!("I2C timeout detected, attempting recovery...");
+                    // I2C specification chapter 3.1.16 Bus Clear
+                    // If the data line (SDA) is stuck LOW, the controller should send nine clock
+                    // pulses. The device that held the bus LOW should release it sometime within
+                    // those nine clocks. If not, then use the HW reset or cycle power to clear the
+                    // bus
+                    self_.i2c.write(0, &[0]).unwrap();
+                    Timer::after(Duration::from_millis(100)).await;
+                }
+                continue;
+            }
         }
 
         // Clear interrupt and start next measurement
@@ -169,11 +227,11 @@ async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
             clear_interrupt_and_start_measurement(&mut self_.device, &mut self_.i2c, &mut Delay)
         {
             warn!("Error clearing interrupt: {:?}", e);
-            if self_.recover_sensor().await.is_err() {
-                error!("Failed to recover sensor, waiting before retry...");
-                Timer::after(Duration::from_millis(500)).await;
-                self_.recovery_mode = true;
-            }
+            // if self_.recover_sensor().await.is_err() {
+            //     error!("Failed to recover sensor, waiting before retry...");
+            //     Timer::after(Duration::from_millis(500)).await;
+            //     self_.recovery_mode = true;
+            // }
         }
     }
 }

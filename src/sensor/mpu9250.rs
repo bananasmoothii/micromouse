@@ -1,13 +1,19 @@
 use crate::sensor::Sensor;
 use core::convert::Infallible;
+use defmt::{info, trace};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
+use embassy_stm32::spi;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::spi::mode::Master;
+use embassy_stm32::time::Hertz;
 use embassy_time::Delay;
-use mpu9250::{Error, Marg, MargMeasurements, Mpu9250, SpiDevice, SpiError};
+use mpu9250::{
+    Error, InterruptConfig, InterruptEnable, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice,
+    SpiError,
+};
 
 pub struct Mpu9250Sensor {
     device: Mpu9250<SpiDevice<Spi<'static, Async, Master>, Output<'static>>, Marg>,
@@ -36,10 +42,19 @@ impl Mpu9250Sensor {
         com: Spi<'static, Async, Master>,
         ncs: Output<'static>,
         gpio_interrupt: ExtiInput<'static>,
-    ) -> Result<Self, Error<SpiError<embassy_stm32::spi::Error, Infallible>>> {
-        defmt::info!("Initializing MPU9250 via SPI...");
-        let device = Mpu9250::marg_default(com, ncs, &mut Delay)?;
-        defmt::info!("MPU9250 initialized successfully");
+    ) -> Result<Self, Error<SpiError<spi::Error, Infallible>>> {
+        info!("Initializing MPU9250 via SPI...");
+        let mut device =
+            Mpu9250::marg_with_reinit(com, ncs, &mut Delay, &mut MpuConfig::marg(), |mut spi, ncs| {
+                let mut new_spi_config = spi::Config::default();
+                // even though the MPU9250 supports up to 20MHz, the max kernel clock for this pin on STM32F446RE is 16MHz.
+                new_spi_config.frequency = Hertz::mhz(16);
+                spi.set_config(&new_spi_config).ok().map(|_| (spi, ncs))
+            })?;
+        device.interrupt_config(InterruptConfig::INT_ANYRD_CLEAR)?;
+        device.enable_interrupts(InterruptEnable::WOM_EN)?;
+        device.enable_interrupts(InterruptEnable::RAW_RDY_EN)?;
+        info!("MPU9250 initialized successfully");
         Ok(Self {
             device,
             gpio_interrupt,
@@ -52,19 +67,23 @@ impl Mpu9250Sensor {
             on_new_data: None,
         })
     }
+
+    fn on_data_ready(&mut self) {
+        match self.device.all() {
+            Ok(data) => self.last_data = data,
+            Err(e) => defmt::error!("Failed to read sensor data: {}", e),
+        }
+        if let Some(callback) = self.on_new_data {
+            callback(&self.last_data);
+        }
+    }
 }
 
 #[embassy_executor::task]
 async fn data_fetch_task(self_: &'static mut Mpu9250Sensor) -> ! {
     loop {
-        self_.gpio_interrupt.wait_for_falling_edge().await;
-        match self_.device.all() {
-            Ok(data) => self_.last_data = data,
-            Err(e) => {
-                defmt::error!("Failed to read sensor data: {}", e);
-                continue;
-            }
-        }
-        self_.on_new_data.unwrap()(&self_.last_data);
+        // data seems to always be ready and fresh, but always reading would block the CPU on this task
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(20)).await;
+        self_.on_data_ready()
     }
 }
