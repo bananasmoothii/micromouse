@@ -16,7 +16,6 @@ pub struct VL53L1XSensor {
     gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
     i2c: I,
     last_data: RangingMeasurementData,
-    recovery_mode: bool,
     on_new_measurement: Option<&'static dyn Fn(&RangingMeasurementData)>,
 }
 
@@ -81,7 +80,6 @@ impl VL53L1XSensor {
             gpio_interrupt: config.gpio_interrupt,
             i2c,
             last_data: RangingMeasurementData::default(),
-            recovery_mode: false,
             on_new_measurement: None,
         })
     }
