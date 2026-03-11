@@ -115,7 +115,7 @@ impl Sensor<RangingMeasurementData, SpawnError> for VL53L1XSensor {
 
 #[embassy_executor::task]
 async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
-    debug!("Distance sensor task running");
+    debug!("VL53L1X Distance sensor task running");
     /*
        loop {
            if !self_.recovery_mode {

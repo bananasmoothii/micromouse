@@ -29,7 +29,7 @@ pub async fn init_i2c_devices(
 ) {
     let mut i2c_config = Config::default();
     // Use 100kHz for more reliable communication
-    i2c_config.frequency = Hertz::khz(200);
+    i2c_config.frequency = Hertz::khz(100);
     i2c_config.gpio_speed = Speed::High;
 
     let i2c = I2c::new(i2c_peri, scl, sda, irqs, tx_dma, rx_dma, i2c_config);
@@ -42,7 +42,10 @@ pub async fn init_i2c_devices(
 
     let sensor0 = match VL53L0XSensor::init_new(
         sensor::vl53lxx::Config {
-            timing_config: TimingConfig::default(),
+            timing_config: TimingConfig {
+                timing_budget_us: 33_000,
+                inter_measurement_period_ms: 0,
+            },
             xshut_pin: xshuts.remove(0),
             gpio_interrupt: interrupts.remove(0),
         },
@@ -62,7 +65,10 @@ pub async fn init_i2c_devices(
 
     let sensor1 = match VL53L1XSensor::init_new(
         sensor::vl53lxx::Config {
-            timing_config: TimingConfig::default(),
+            timing_config: TimingConfig {
+                timing_budget_us: 66_000,
+                inter_measurement_period_ms: 69,
+            },
             xshut_pin: xshuts.remove(0),
             gpio_interrupt: interrupts.remove(0),
         },
