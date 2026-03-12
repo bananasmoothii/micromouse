@@ -1,4 +1,3 @@
-use crate::devices::Sensor;
 use crate::devices::vl53lxx::Config;
 use core::fmt::Debug;
 use defmt::{Format, debug, warn, trace};
@@ -72,10 +71,8 @@ impl VL53L0XSensor {
             on_new_measurement: None,
         })
     }
-}
 
-impl Sensor<MeasurementData, StartError> for VL53L0XSensor {
-    async fn start_continuous_measurement(
+    pub async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
         callable: &'static dyn Fn(&MeasurementData),
@@ -90,7 +87,7 @@ impl Sensor<MeasurementData, StartError> for VL53L0XSensor {
         Ok(())
     }
 
-    fn get_latest_measurement(&self) -> &MeasurementData {
+    pub fn get_latest_measurement(&self) -> &MeasurementData {
         &self.last_data
     }
 }

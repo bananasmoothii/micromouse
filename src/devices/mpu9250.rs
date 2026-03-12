@@ -1,4 +1,3 @@
-use crate::devices::Sensor;
 use core::convert::Infallible;
 use defmt::{info, trace};
 use embassy_executor::{SpawnError, Spawner};
@@ -20,21 +19,6 @@ pub struct Mpu9250Sensor {
     gpio_interrupt: ExtiInput<'static>,
     last_data: MargMeasurements<[f32; 3]>,
     on_new_data: Option<&'static dyn Fn(&MargMeasurements<[f32; 3]>)>,
-}
-
-impl Sensor<MargMeasurements<[f32; 3]>, SpawnError> for Mpu9250Sensor {
-    async fn start_continuous_measurement(
-        &'static mut self,
-        spawner: &mut Spawner,
-        callable: &'static dyn Fn(&MargMeasurements<[f32; 3]>),
-    ) -> Result<(), SpawnError> {
-        self.on_new_data = Some(callable);
-        spawner.spawn(data_fetch_task(self))
-    }
-
-    fn get_latest_measurement(&self) -> &MargMeasurements<[f32; 3]> {
-        &self.last_data
-    }
 }
 
 impl Mpu9250Sensor {
@@ -76,6 +60,19 @@ impl Mpu9250Sensor {
         if let Some(callback) = self.on_new_data {
             callback(&self.last_data);
         }
+    }
+
+    pub async fn start_continuous_measurement(
+        &'static mut self,
+        spawner: &mut Spawner,
+        callable: &'static dyn Fn(&MargMeasurements<[f32; 3]>),
+    ) -> Result<(), SpawnError> {
+        self.on_new_data = Some(callable);
+        spawner.spawn(data_fetch_task(self))
+    }
+
+    pub fn get_latest_measurement(&self) -> &MargMeasurements<[f32; 3]> {
+        &self.last_data
     }
 }
 

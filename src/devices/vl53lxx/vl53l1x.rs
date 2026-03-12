@@ -1,4 +1,3 @@
-use crate::devices::Sensor;
 use crate::devices::vl53lxx::{Config, MeasurementData};
 use defmt::{debug, info, trace, warn};
 use embassy_executor::{SpawnError, Spawner};
@@ -93,11 +92,8 @@ impl VL53L1XSensor {
         info!("  Sensor recovered");
         Ok(())
     }
-}
 
-// Step 1: Implement the base Sensor trait
-impl Sensor<RangingMeasurementData, SpawnError> for VL53L1XSensor {
-    async fn start_continuous_measurement(
+    pub async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
         callable: &'static dyn Fn(&RangingMeasurementData),
@@ -106,7 +102,7 @@ impl Sensor<RangingMeasurementData, SpawnError> for VL53L1XSensor {
         spawner.spawn(distance_sensor_task(self))
     }
 
-    fn get_latest_measurement(&self) -> &RangingMeasurementData {
+    pub fn get_latest_measurement(&self) -> &RangingMeasurementData {
         &self.last_data
     }
 }

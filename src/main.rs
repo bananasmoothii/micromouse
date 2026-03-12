@@ -19,12 +19,13 @@ use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::peripherals::I2C1;
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
+use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
 use devices::vl53lxx::vl53l1x::VL53L1XSensor;
-use crate::devices::Sensor;
+use crate::devices::battery::battery_monitoring_task;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -49,7 +50,7 @@ async fn main(mut spawner: Spawner) {
         embedded_alloc::init!(HEAP, HEAP_SIZE);
     }
 
-    let p = embassy_stm32::init(Default::default());
+    let mut p = embassy_stm32::init(Default::default());
 
     /*
     init_i2c_devices(
@@ -127,6 +128,8 @@ async fn main(mut spawner: Spawner) {
         .await
         .unwrap();
     */
+
+    spawner.spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0)).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);

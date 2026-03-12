@@ -1,4 +1,3 @@
-use crate::devices::Sensor;
 use crate::devices::vl53lxx::TimingConfig;
 use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
 use crate::devices::vl53lxx::vl53l1x::VL53L1XSensor;
