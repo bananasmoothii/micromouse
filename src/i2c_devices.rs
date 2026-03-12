@@ -1,8 +1,8 @@
-use crate::sensor::Sensor;
-use crate::sensor::vl53lxx::TimingConfig;
-use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;
-use crate::sensor::vl53lxx::vl53l1x::VL53L1XSensor;
-use crate::{Irqs, sensor};
+use crate::devices::Sensor;
+use crate::devices::vl53lxx::TimingConfig;
+use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
+use crate::devices::vl53lxx::vl53l1x::VL53L1XSensor;
+use crate::{Irqs, devices};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -41,7 +41,7 @@ pub async fn init_i2c_devices(
     info!("Initializing distance sensors...");
 
     let sensor0 = match VL53L0XSensor::init_new(
-        sensor::vl53lxx::Config {
+        devices::vl53lxx::Config {
             timing_config: TimingConfig::default(),
             xshut_pin: xshuts.remove(0),
             gpio_interrupt: interrupts.remove(0),
@@ -61,7 +61,7 @@ pub async fn init_i2c_devices(
     };
 
     let sensor1 = match VL53L1XSensor::init_new(
-        sensor::vl53lxx::Config {
+        devices::vl53lxx::Config {
             timing_config: TimingConfig::default(),
             xshut_pin: xshuts.remove(0),
             gpio_interrupt: interrupts.remove(0),

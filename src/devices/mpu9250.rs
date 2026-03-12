@@ -1,4 +1,4 @@
-use crate::sensor::Sensor;
+use crate::devices::Sensor;
 use core::convert::Infallible;
 use defmt::{info, trace};
 use embassy_executor::{SpawnError, Spawner};

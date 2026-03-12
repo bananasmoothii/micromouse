@@ -3,12 +3,12 @@
 extern crate alloc;
 
 mod i2c_devices;
-mod sensor;
+mod devices;
 
 use alloc::boxed::Box;
 use crate::i2c_devices::init_i2c_devices;
-use crate::sensor::mpu9250::Mpu9250Sensor;
-use crate::sensor::vl53lxx::vl53l0x::VL53L0XSensor;
+use crate::devices::mpu9250::Mpu9250Sensor;
+use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
 use alloc::vec;
 use alloc::vec::Vec;
 use defmt::*;
@@ -23,8 +23,8 @@ use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
-use sensor::vl53lxx::vl53l1x::VL53L1XSensor;
-use crate::sensor::Sensor;
+use devices::vl53lxx::vl53l1x::VL53L1XSensor;
+use crate::devices::Sensor;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -51,6 +51,7 @@ async fn main(mut spawner: Spawner) {
 
     let p = embassy_stm32::init(Default::default());
 
+    /*
     init_i2c_devices(
         &mut spawner,
         p.I2C1,
@@ -125,6 +126,7 @@ async fn main(mut spawner: Spawner) {
     })
         .await
         .unwrap();
+    */
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);

@@ -1,5 +1,5 @@
-use crate::sensor::Sensor;
-use crate::sensor::vl53lxx::Config;
+use crate::devices::Sensor;
+use crate::devices::vl53lxx::Config;
 use core::fmt::Debug;
 use defmt::{Format, debug, warn, trace};
 use embassy_executor::{SpawnError, Spawner};

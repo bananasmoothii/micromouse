@@ -1,5 +1,5 @@
-use crate::sensor::Sensor;
-use crate::sensor::vl53lxx::{Config, MeasurementData};
+use crate::devices::Sensor;
+use crate::devices::vl53lxx::{Config, MeasurementData};
 use defmt::{debug, info, trace, warn};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
