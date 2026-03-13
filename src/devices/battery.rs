@@ -2,6 +2,7 @@ use alloc::format;
 use defmt::{debug, info};
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::{Peri, peripherals};
+use embassy_time::{Duration, Timer};
 
 // change types if needed, again this is because of embassy task not allowing generics
 #[embassy_executor::task]
@@ -41,6 +42,6 @@ pub async fn battery_monitoring_task(
             format!("{:.1}", battery_voltage2).as_str()
         );
 
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+        Timer::after(Duration::from_secs(2)).await;
     }
 }

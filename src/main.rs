@@ -2,30 +2,35 @@
 #![no_main]
 extern crate alloc;
 
-mod i2c_devices;
 mod devices;
+mod i2c_devices;
 
-use alloc::boxed::Box;
-use crate::i2c_devices::init_i2c_devices;
+use crate::devices::battery::battery_monitoring_task;
+use crate::devices::motors::{Motor, MotorDirection};
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
+use crate::i2c_devices::init_i2c_devices;
+use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use defmt::*;
 use defmt_rtt as _;
+use devices::vl53lxx::vl53l1x::VL53L1XSensor;
 use embassy_executor::Spawner;
-use embassy_stm32::exti::{self, ExtiInput};
-use embassy_stm32::gpio::{Level, Output, Pull, Speed};
-use embassy_stm32::peripherals::I2C1;
-use embassy_stm32::{bind_interrupts, interrupt};
-use embassy_stm32::{i2c, spi};
 use embassy_stm32::adc::{Adc, SampleTime};
+use embassy_stm32::exti::{self, ExtiInput};
+use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
+use embassy_stm32::peripherals::{I2C1, TIM3};
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
+use embassy_stm32::timer::Channel;
+use embassy_stm32::timer::low_level::CountingMode;
+use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
+use embassy_stm32::{bind_interrupts, interrupt};
+use embassy_stm32::{i2c, spi};
+use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
-use devices::vl53lxx::vl53l1x::VL53L1XSensor;
-use crate::devices::battery::battery_monitoring_task;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -51,6 +56,10 @@ async fn main(mut spawner: Spawner) {
     }
 
     let mut p = embassy_stm32::init(Default::default());
+
+    spawner
+        .spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0))
+        .unwrap();
 
     /*
     init_i2c_devices(
@@ -129,7 +138,28 @@ async fn main(mut spawner: Spawner) {
         .unwrap();
     */
 
-    spawner.spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0)).unwrap();
+    let pwm_pin = PwmPin::new(p.PB4, OutputType::PushPull);
+    let pwm = SimplePwm::new(
+        p.TIM3,
+        Some(pwm_pin),
+        None,
+        None,
+        None,
+        Hertz::khz(15),
+        CountingMode::EdgeAlignedUp,
+    );
+
+    let motor1 = Motor::new(
+        &spawner,
+        p.PA8,
+        p.PA9,
+        pwm,
+        Channel::Ch1,
+        Adc::new(p.ADC2),
+        p.PA4,
+        p.PA0,
+    );
+    spawner.spawn(motor_task(motor1)).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
@@ -152,4 +182,28 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
             action()
         }
     }
+}
+
+#[embassy_executor::task]
+async fn motor_task(mut motor1: Motor<'static, TIM3>) {
+    motor1.set_direction(MotorDirection::Forward);
+
+    // minimum speed percentage seems to be 9%
+    for i in 9..=100 {
+        motor1.set_speed(i as f32 * 0.01);
+        info!("speed: {}%", i);
+        Timer::after(Duration::from_millis(100)).await;
+    }
+    info!("reached max speed");
+
+    // if this function ends, pins are dropped and the motor halts
+    Timer::after(Duration::from_secs(5000)).await;
+
+    // motor1.set_speed(0.5);
+    // loop {
+    //     motor1.set_direction(MotorDirection::Forward);
+    //     Timer::after(Duration::from_secs(1)).await;
+    //     motor1.set_direction(MotorDirection::Reverse);
+    //     Timer::after(Duration::from_secs(1)).await;
+    // }
 }
