@@ -4,6 +4,7 @@ extern crate alloc;
 
 mod devices;
 mod i2c_devices;
+pub mod positioning;
 
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::hall_sensor_3144::hall_sensor_continuous_measuring;
@@ -32,6 +33,8 @@ use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
+use crate::positioning::positioning_task;
+use crate::positioning::{ODOM_LEFT_CHANNEL, MPU_CHANNEL};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -62,6 +65,9 @@ async fn main(mut spawner: Spawner) {
     spawner
         .spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0))
         .unwrap();
+
+    // Start Positioning task
+    spawner.spawn(positioning_task()).unwrap();
 
     /*
     init_i2c_devices(
@@ -131,10 +137,7 @@ async fn main(mut spawner: Spawner) {
     };
 
     imu.start_continuous_measurement(&mut spawner, &|data| {
-        info!(
-            "New IMU data: Accel: {:?}, Gyro: {:?}, Mag: {:?}, Temp: {}",
-            data.accel, data.gyro, data.mag, data.temp
-        );
+        let _ = MPU_CHANNEL.try_send(data.clone());
     })
         .await
         .unwrap();
@@ -164,7 +167,7 @@ async fn main(mut spawner: Spawner) {
     spawner.spawn(motor_task(motor1)).unwrap();
 
     spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PB3, p.EXTI3, Pull::None, Irqs), &|| {
-        debug!("BIP !");
+        let _ = ODOM_LEFT_CHANNEL.try_send(1); // Or appropriate delta logic
     })).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);

@@ -40,6 +40,8 @@ vl53l0x = { git = "https://github.com/bananasmoothii/vl53l0x", rev = "afb05560",
 
 mpu9250 = { git = "https://github.com/bananasmoothii/mpu9250-forked", rev = "4bc31c80", features = ["defmt"] }
 
+kalmanfilt = "0.3"
+
 [profile.release]
 debug = 2
 
