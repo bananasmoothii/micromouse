@@ -6,6 +6,7 @@ mod devices;
 mod i2c_devices;
 
 use crate::devices::battery::battery_monitoring_task;
+use crate::devices::hall_sensor_3144::hall_sensor_continuous_measuring;
 use crate::devices::motors::{Motor, MotorDirection};
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
@@ -43,6 +44,7 @@ bind_interrupts!(
         EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
         EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
         EXTI2 => exti::InterruptHandler<interrupt::typelevel::EXTI2>;
+        EXTI3 => exti::InterruptHandler<interrupt::typelevel::EXTI3>;
         I2C1_EV => i2c::EventInterruptHandler<I2C1>;
         I2C1_ER => i2c::ErrorInterruptHandler<I2C1>;
     }
@@ -160,6 +162,10 @@ async fn main(mut spawner: Spawner) {
         p.PA0,
     );
     spawner.spawn(motor_task(motor1)).unwrap();
+
+    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PB3, p.EXTI3, Pull::None, Irqs), &|| {
+        debug!("BIP !");
+    })).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
