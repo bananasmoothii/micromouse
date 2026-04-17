@@ -4,25 +4,29 @@ use embassy_time::Instant;
 use mpu9250::MargMeasurements; // Ensure `mpu9250` in Cargo.toml has this
 
 pub struct MpuProcessor {
-    last_yaw: f32, // Rad
     last_update_time: Option<Instant>,
+    initial_mag_heading: Option<f32>,
 }
 
 impl MpuProcessor {
     pub fn new() -> Self {
         Self {
-            last_yaw: 0.0,
             last_update_time: None,
+            initial_mag_heading: None,
         }
     }
 
     /// Process raw data from MPU9250 to determine rotational change in yaw (heading).
-    pub fn update(&mut self, _accel: [f32; 3], mut gyro: [f32; 3], _mag: [f32; 3]) -> MovementDelta {
+    pub fn update(&mut self, mut accel: [f32; 3], mut gyro: [f32; 3], mut mag: [f32; 3]) -> (MovementDelta, f32, f32, f32, f32) {
         let now = Instant::now();
 
         // Invert Y and Z per upside-down configuration
         gyro[1] = -gyro[1];
         gyro[2] = -gyro[2];
+        mag[1] = -mag[1];
+        mag[2] = -mag[2];
+        accel[1] = -accel[1];
+        accel[2] = -accel[2];
 
         // Ensure time elapsed is known
         let dt = if let Some(last_time) = self.last_update_time {
@@ -39,12 +43,21 @@ impl MpuProcessor {
 
         self.last_update_time = Some(now);
 
+        // Compute absolute magnetometer heading
+        let absolute_mag = micromath::F32Ext::atan2(mag[1], mag[0]);
+        let initial = *self.initial_mag_heading.get_or_insert(absolute_mag);
+
+        // Normalize compass heading relative to start direction [-PI, PI]
+        let mut relative_mag = absolute_mag - initial;
+        while relative_mag > core::f32::consts::PI { relative_mag -= 2.0 * core::f32::consts::PI; }
+        while relative_mag < -core::f32::consts::PI { relative_mag += 2.0 * core::f32::consts::PI; }
+
         let delta = MovementDelta {
             dx: 0.0,
             dy: 0.0,
             dtheta: delta_yaw,
         };
 
-        delta
+        (delta, relative_mag, dt, accel[0], accel[1])
     }
 }

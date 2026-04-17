@@ -1,20 +1,22 @@
-use crate::positioning::types::{MovementDelta, Position2D};
+use crate::positioning::types::MovementDelta;
 use core::f32::consts::PI;
-use embassy_time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug)]
 pub struct OdometryConfig {
-    pub wheel_radius: f32, // meters
-    pub wheel_base: f32, // meters (distance between left and right wheels)
-    pub ticks_per_rev: u32,
+    /// meters
+    pub wheel_radius: f32,
+    /// meters (distance between left and right wheels)
+    pub wheel_base: f32,
+
+    pub ticks_per_revolution: f32,
 }
 
 impl Default for OdometryConfig {
     fn default() -> Self {
         Self {
-            wheel_radius: 0.015,
-            wheel_base: 0.08,
-            ticks_per_rev: 12,
+            wheel_radius: 0.020,
+            wheel_base: 0.078,
+            ticks_per_revolution: 2.0, // Very low resolution, requires accelerometer interpolation
         }
     }
 }
@@ -23,18 +25,16 @@ pub struct OdometryProcessor {
     config: OdometryConfig,
     left_ticks: i32,
     right_ticks: i32,
-    last_update_time: Instant,
     distance_per_tick: f32,
 }
 
 impl OdometryProcessor {
     pub fn new(config: OdometryConfig) -> Self {
-        let distance_per_tick = 2.0 * PI * config.wheel_radius / (config.ticks_per_rev as f32);
+        let distance_per_tick = 2.0 * PI * config.wheel_radius / config.ticks_per_revolution;
         Self {
             config,
             left_ticks: 0,
             right_ticks: 0,
-            last_update_time: Instant::now(),
             distance_per_tick,
         }
     }

@@ -88,6 +88,7 @@ async fn main(mut spawner: Spawner) {
         ],
     )
         .await;
+     */
 
     info!("Configuring SPI...");
     let mut spi_config = spi::Config::default();
@@ -117,15 +118,15 @@ async fn main(mut spawner: Spawner) {
     // Pulse CS to ensure the chip recognizes SPI mode
     info!("Pulsing CS to enable SPI mode...");
     chip_select.set_low();
-    embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+    Timer::after(Duration::from_millis(10)).await;
     chip_select.set_high();
-    embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+    Timer::after(Duration::from_millis(10)).await;
 
     info!("Initializing MPU9250 IMU...");
 
     let imu =
         Mpu9250Sensor::init_new(spi, chip_select, interrupt);
-    let imu = match imu {
+    let mut imu = match imu {
         Ok(s) => {
             info!("IMU initialized successfully");
             Box::leak(Box::new(s))
@@ -141,33 +142,14 @@ async fn main(mut spawner: Spawner) {
     })
         .await
         .unwrap();
-    */
 
-    let pwm_pin = PwmPin::new(p.PB4, OutputType::PushPull);
-    let pwm = SimplePwm::new(
-        p.TIM3,
-        Some(pwm_pin),
-        None,
-        None,
-        None,
-        Hertz::khz(15),
-        CountingMode::EdgeAlignedUp,
-    );
 
-    let motor1 = Motor::new(
-        &spawner,
-        p.PA8,
-        p.PA9,
-        pwm,
-        Channel::Ch1,
-        Adc::new(p.ADC2),
-        p.PA4,
-        p.PA0,
-    );
-    spawner.spawn(motor_task(motor1)).unwrap();
+    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs), &|| {
+        let _ = ODOM_LEFT_CHANNEL.try_send(1); // Depending on motor direction, this can be -1
+    })).unwrap();
 
-    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PB3, p.EXTI3, Pull::None, Irqs), &|| {
-        let _ = ODOM_LEFT_CHANNEL.try_send(1); // Or appropriate delta logic
+    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs), &|| {
+        let _ = positioning::ODOM_RIGHT_CHANNEL.try_send(1); // Depending on motor direction, this can be -1
     })).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
