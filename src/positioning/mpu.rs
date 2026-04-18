@@ -1,7 +1,13 @@
 use crate::positioning::types::MovementDelta;
-use defmt::{info, trace};
 use embassy_time::Instant;
-use mpu9250::MargMeasurements; // Ensure `mpu9250` in Cargo.toml has this
+
+pub struct MpuResult {
+    pub delta: MovementDelta,
+    pub relative_mag: f32,
+    pub dt: f32,
+    pub accel_x: f32,
+    pub accel_y: f32,
+}
 
 pub struct MpuProcessor {
     last_update_time: Option<Instant>,
@@ -17,7 +23,7 @@ impl MpuProcessor {
     }
 
     /// Process raw data from MPU9250 to determine rotational change in yaw (heading).
-    pub fn update(&mut self, mut accel: [f32; 3], mut gyro: [f32; 3], mut mag: [f32; 3]) -> (MovementDelta, f32, f32, f32, f32) {
+    pub fn update(&mut self, mut accel: [f32; 3], mut gyro: [f32; 3], mut mag: [f32; 3]) -> MpuResult {
         let now = Instant::now();
 
         // Invert Y and Z per upside-down configuration
@@ -58,6 +64,12 @@ impl MpuProcessor {
             dtheta: delta_yaw,
         };
 
-        (delta, relative_mag, dt, accel[0], accel[1])
+        MpuResult {
+            delta,
+            relative_mag,
+            dt,
+            accel_x: accel[0],
+            accel_y: accel[1],
+        }
     }
 }

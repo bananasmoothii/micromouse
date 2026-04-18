@@ -35,9 +35,10 @@ impl Mpu9250Sensor {
                 new_spi_config.frequency = Hertz::mhz(16);
                 spi.set_config(&new_spi_config).ok().map(|_| (spi, ncs))
             })?;
-        device.interrupt_config(InterruptConfig::INT_ANYRD_CLEAR)?;
-        device.enable_interrupts(InterruptEnable::WOM_EN)?;
-        device.enable_interrupts(InterruptEnable::RAW_RDY_EN)?;
+        // interrupts don't seem to work
+        // device.interrupt_config(InterruptConfig::INT_ANYRD_CLEAR)?;
+        // device.enable_interrupts(InterruptEnable::WOM_EN)?;
+        // device.enable_interrupts(InterruptEnable::RAW_RDY_EN)?;
         info!("MPU9250 initialized successfully");
         Ok(Self {
             device,

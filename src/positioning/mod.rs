@@ -22,23 +22,20 @@ pub async fn positioning_task() {
 
     loop {
         // Collect data from sensors
-        let mut mpu_delta = MovementDelta { dx: 0.0, dy: 0.0, dtheta: 0.0 };
-        let mut mag_heading = 0.0;
-        let mut accel_x = 0.0;
-        let mut accel_y = 0.0;
-        let mut loop_dt = 0.01; // initial default fallback
+        let mut mpu_result = mpu::MpuResult {
+            delta: MovementDelta { dx: 0.0, dy: 0.0, dtheta: 0.0 },
+            relative_mag: 0.0,
+            dt: 0.02,
+            accel_x: 0.0,
+            accel_y: 0.0,
+        };
 
         let odom_delta;
         let mut updated = false;
 
         // Non-blocking drain configures the frame
         while let Ok(data) = MPU_CHANNEL.try_receive() {
-            let res = mpu_proc.update(data.accel, data.gyro, data.mag);
-            mpu_delta = res.0;
-            mag_heading = res.1;
-            loop_dt = res.2;
-            accel_x = res.3;
-            accel_y = res.4;
+            mpu_result = mpu_proc.update(data.accel, data.gyro, data.mag);
             updated = true;
         }
 
@@ -53,19 +50,16 @@ pub async fn positioning_task() {
 
         if left_ticks != 0 || right_ticks != 0 {
             odom_proc.add_ticks(left_ticks, right_ticks);
-            odom_delta = odom_proc.update();
             updated = true;
-        } else {
-            // Update even if no new ticks, based on 0-delta
-            odom_delta = odom_proc.update();
         }
+        odom_delta = odom_proc.update();
 
         if updated {
-            let state = fusion_proc.update(loop_dt, odom_delta, mpu_delta, accel_x, accel_y, mag_heading);
+            let state = fusion_proc.update(odom_delta, mpu_result);
             info!("Position -> X: {}, Y: {}, Theta: {}", state.x, state.y, state.theta);
         }
 
         // Processing loop rate
-        embassy_time::Timer::after_millis(10).await;
+        embassy_time::Timer::after_millis(20).await;
     }
 }

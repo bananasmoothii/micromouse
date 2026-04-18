@@ -1,4 +1,6 @@
+use core::f32::consts::PI;
 use crate::positioning::types::{MovementDelta, Position2D};
+use crate::positioning::mpu::MpuResult;
 use micromath::F32Ext;
 
 pub struct SensorFusion {
@@ -52,7 +54,13 @@ impl SensorFusion {
         }
     }
 
-    pub fn update(&mut self, dt: f32, odom_delta: MovementDelta, mpu_delta: MovementDelta, accel_x: f32, accel_y: f32, mag_heading: f32) -> Position2D {
+    pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult) -> Position2D {
+        let dt = mpu.dt;
+        let mpu_delta = mpu.delta;
+        let accel_x = mpu.accel_x;
+        let accel_y = mpu.accel_y;
+        let mag_heading = mpu.relative_mag;
+
         // --- 1D Kalman Filter for Theta ---
 
         // 1. Predict (using MPU gyro delta)
@@ -70,8 +78,8 @@ impl SensorFusion {
 
         // 3. Update (using Magnetometer absolute heading)
         let mut z_mag = mag_heading - self.state.theta;
-        while z_mag > core::f32::consts::PI { z_mag -= 2.0 * core::f32::consts::PI; }
-        while z_mag < -core::f32::consts::PI { z_mag += 2.0 * core::f32::consts::PI; }
+        while z_mag > PI { z_mag -= 2.0 * PI; }
+        while z_mag < -PI { z_mag += 2.0 * PI; }
 
         let s_mag = self.p_theta + self.r_theta_mag;
         let k_mag = self.p_theta / s_mag;
@@ -80,8 +88,8 @@ impl SensorFusion {
         self.p_theta = (1.0 - k_mag) * self.p_theta;
 
         // Normalize theta to [-PI, PI] to keep math clean
-        while self.state.theta > core::f32::consts::PI { self.state.theta -= 2.0 * core::f32::consts::PI; }
-        while self.state.theta < -core::f32::consts::PI { self.state.theta += 2.0 * core::f32::consts::PI; }
+        while self.state.theta > PI { self.state.theta -= 2.0 * PI; }
+        while self.state.theta < -PI { self.state.theta += 2.0 * PI; }
 
         let (sin_theta, cos_theta) = self.state.theta.sin_cos();
 
@@ -97,14 +105,14 @@ impl SensorFusion {
         // Integration Method:
         // - Velocity uses standard Euler integration ("left rectangles" rule): v_new = v_old + a * dt
         // - Position uses the precise constant-acceleration kinematic equation: p_new = p_old + v_old * dt + 0.5 * a * dt^2
-        let a_X_global = a_x * cos_theta - a_y * sin_theta;
-        let a_Y_global = a_x * sin_theta + a_y * cos_theta;
+        let a_x_global = a_x * cos_theta - a_y * sin_theta;
+        let a_y_global = a_x * sin_theta + a_y * cos_theta;
 
-        self.state.x += self.state.v_x * dt + 0.5 * a_X_global * dt * dt;
-        self.state.y += self.state.v_y * dt + 0.5 * a_Y_global * dt * dt;
+        self.state.x += self.state.v_x * dt + 0.5 * a_x_global * dt * dt;
+        self.state.y += self.state.v_y * dt + 0.5 * a_y_global * dt * dt;
 
-        self.state.v_x += a_X_global * dt;
-        self.state.v_y += a_Y_global * dt;
+        self.state.v_x += a_x_global * dt;
+        self.state.v_y += a_y_global * dt;
 
         // Prevent integration from growing to infinity from generic sensor bias by softly decaying
         self.state.v_x *= 0.95;

@@ -37,12 +37,21 @@ rotational prediction ($\Delta \theta_{mpu}$).
 Additionally, the processor captures the X and Y axes of the magnetometer (compass logic) to establish an absolute
 heading in relation to where the device turned on (`mag_heading_relative`).
 
-### Sensor Fusion (Kalman Filter)
+### Sensor Fusion (Linear Kalman Filter)
 
-The system uses an intrinsic **1D Kalman Filter** to reliably merge all this incoming sensor data into one absolute
+The system uses an intrinsic **1D Linear Kalman Filter** to reliably merge all this incoming sensor data into one
+absolute
 orientation (heading) which in turn powers the calculation of the absolute X/Y Cartesian coordinates.
-There is a supplementary **2D Phase Kalman Filter** executing simultaneously to calculate global X/Y Positioning. The
-architecture uses kinematic *Constant-Acceleration* mechanics over elapsed time.
+There is a supplementary **2D Linear Kalman Filter** executing simultaneously to calculate global X/Y Positioning.
+
+*Note on Filter Type:* This implementation is strictly a **Linear Kalman Filter (LKF)**. While robot kinematics are
+inherently non-linear (due to trigonometric rotation), the architecture deliberately uses a "decoupled" approach to save
+CPU cycles on the Cortex-M microcontroller. Instead of computing complex Jacobian matrices for an Extended Kalman
+Filter (EKF) or tracking sigma points for an Unscented Kalman Filter (UKF), it statically resolves the non-linear
+trigonometry (`sin`/`cos`) first, converts the sensor inputs into global linear coordinate frames, and *then* feeds
+those projections into the fast Linear Kalman Filter matrices.
+
+The architecture uses kinematic *Constant-Acceleration* mechanics over elapsed time.
 
 **The Position Filter handles Three Aspects:**
 
@@ -103,3 +112,55 @@ chassis, the compass will swing wildly while moving. This is why `r_theta_mag` i
 *Action:* If you somehow manage to shield the magnetometer or run tests without motors, you can DECREASE this (to e.g.,
 `0.5`). This would radically improve global positional permanence. Otherwise, leaving it high ensures the compass only
 steps in to gradually fight endless "long-walk gyro drifting" that happens across multiple minutes.
+
+## Demystifying the Kalman Filter Math
+
+If you look at the Wikipedia page for the Kalman filter, you will see a lot of intimidating matrix math with variables
+like $\mathbf{P}$, $\mathbf{Q}$, and $\mathbf{R}$. Because our implementation is a simplified *1D Scalar (Linear)*
+filter, those matrices collapse into standard float variables (`p`, `q`, and `r`).
+
+### Where did the tuning values come from?
+
+- **`p` (from $\mathbf{P}_{k|k}$)**: The *Estimate Covariance matrix*. It represents our current uncertainty. It is
+  initialized at `1.0` (a wild guess), but it self-corrects and converges to its true optimal value almost immediately
+  after running a few loops, so the starting value doesn't really matter!
+- **`q` (from $\mathbf{Q}_k$)**: The *Process Noise covariance matrix*. We initialized it arbitrarily small (e.g.,
+  `0.001`) because gyroscopes and kinematic equations are mathematically very accurate over a tiny time step (10ms).
+- **`r` (from $\mathbf{R}_k$)**: The *Measurement Noise covariance matrix*. We initialized it higher (e.g., `0.05` for
+  odometry, `10.0` for compass) based on educated guesses of their physical reliability, because raw sensors easily
+  jitter.
+
+### The Formulas Used
+
+Because we don't use matrices, the scary vector equations from Wikipedia simplify dramatically into basic algebra:
+
+**1. Predict Step:**
+
+- *State Prediction*: $x = x + \Delta u$ (Code: `theta += dtheta`)
+- *Covariance Prediction*: $P = P + Q$
+
+**2. Update (Measurement) Step:**
+
+- *Innovation (Residual - $\mathbf{y}_k$)*: $y = z - x$ (Where $z$ is the measurement from the sensor. How far off was
+  our prediction?)
+- *Innovation Covariance ($\mathbf{S}_k$)*: $S = P + R$ (Total uncertainty of the system + the sensor)
+- *Kalman Gain ($\mathbf{K}_k$)*: $K = P / S$ (A ratio from 0.0 to 1.0 representing how much we should trust this
+  measurement)
+- *State Update*: $x = x + K \cdot y$
+- *Covariance Update*: $P = (1 - K) \cdot P$ (Our uncertainty shrinks because a measurement gave us more information)
+
+### Multiple Inputs to One Output (Sequential Updating)
+
+Wikipedia often explains multi-sensor fusion using a massive measurement matrix ($\mathbf{H}$). In a microcontroller,
+doing multi-dimensional matrix inversion is very slow and complex.
+
+Instead, we use a perfectly mathematically equivalent technique called **Sequential Updating**.
+When we have multiple measurements (Odometry and Magnetometer) for the same state (`theta`), we simply run the
+**Update** step sequentially!
+
+1. **Predict** using the Gyroscope.
+2. **Update** using Odometry. This gives us a slightly better `theta` and a smaller `P`.
+3. **Update** *again* immediately using the Magnetometer, feeding in the new `theta` and the smaller `P` from step 2.
+
+This cascades the corrections cleanly, fusing all three sensors into a single dimension without needing any matrix
+algebra.

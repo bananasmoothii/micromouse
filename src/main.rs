@@ -126,7 +126,7 @@ async fn main(mut spawner: Spawner) {
 
     let imu =
         Mpu9250Sensor::init_new(spi, chip_select, interrupt);
-    let mut imu = match imu {
+    let imu = match imu {
         Ok(s) => {
             info!("IMU initialized successfully");
             Box::leak(Box::new(s))
