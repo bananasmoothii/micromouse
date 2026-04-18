@@ -13,12 +13,15 @@ use mpu9250::{
     Error, InterruptConfig, InterruptEnable, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice,
     SpiError,
 };
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+
+pub static MPU_CHANNEL: Channel<CriticalSectionRawMutex, MargMeasurements<[f32; 3]>, 4> = Channel::new();
 
 pub struct Mpu9250Sensor {
     device: Mpu9250<SpiDevice<Spi<'static, Async, Master>, Output<'static>>, Marg>,
     gpio_interrupt: ExtiInput<'static>,
     last_data: MargMeasurements<[f32; 3]>,
-    on_new_data: Option<&'static dyn Fn(&MargMeasurements<[f32; 3]>)>,
 }
 
 impl Mpu9250Sensor {
@@ -49,7 +52,6 @@ impl Mpu9250Sensor {
                 mag: [0.0; 3],
                 temp: 0.0,
             },
-            on_new_data: None,
         })
     }
 
@@ -58,17 +60,13 @@ impl Mpu9250Sensor {
             Ok(data) => self.last_data = data,
             Err(e) => defmt::error!("Failed to read sensor data: {}", e),
         }
-        if let Some(callback) = self.on_new_data {
-            callback(&self.last_data);
-        }
+        let _ = MPU_CHANNEL.try_send(self.last_data);
     }
 
     pub async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
-        callable: &'static dyn Fn(&MargMeasurements<[f32; 3]>),
     ) -> Result<(), SpawnError> {
-        self.on_new_data = Some(callable);
         spawner.spawn(data_fetch_task(self))
     }
 

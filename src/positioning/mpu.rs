@@ -61,7 +61,7 @@ impl MpuProcessor {
         let delta = MovementDelta {
             dx: 0.0,
             dy: 0.0,
-            dtheta: delta_yaw,
+            d_theta: delta_yaw,
         };
 
         MpuResult {

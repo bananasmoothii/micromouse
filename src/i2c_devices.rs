@@ -81,21 +81,12 @@ pub async fn init_i2c_devices(
 
     info!("Starting continuous measurement");
     sensor0
-        .start_continuous_measurement(&mut spawner, &|data| {
-            info!("New measurement: {} mm {}", data.distance_mm, data.status);
-        })
+        .start_continuous_measurement(&mut spawner)
         .await
         .unwrap();
 
     sensor1
-        .start_continuous_measurement(&mut spawner, &|data| {
-            info!(
-                "New measurement: {} mm {} σ={}",
-                data.range_milli_meter,
-                data.range_status,
-                data.sigma_milli_meter as f32 / 65536.0
-            );
-        })
+        .start_continuous_measurement(&mut spawner)
         .await
         .unwrap();
 }

@@ -53,6 +53,43 @@ those projections into the fast Linear Kalman Filter matrices.
 
 The architecture uses kinematic *Constant-Acceleration* mechanics over elapsed time.
 
+### Why Odometry uses `d_center` and `d_theta`
+
+Because the Micromouse uses a "Differential Drive" system, we don't have steerable wheels. Instead, we map Odometry
+using two simple kinematic physics formulas:
+
+- **`d_center` (Forward Translation)**: The average distance both wheels traveled ($\frac{D_{right} + D_{left}}{2}$). If
+  both wheels spin forward exactly 1cm, the center of the robot moved forward 1cm.
+- **`d_theta` (Rotation/Yaw)**: The difference between the wheels divided by the width of the robot
+  axle ($\frac{D_{right} - D_{left}}{wheel\_base}$). If the right wheel drives forward 1cm, and the left wheel is
+  stopped, the robot "pivots" to the Left.
+
+*Coordinate System Reminder:* The robot's mathematics strictly follows the standard Orthonormal Right-Hand Rule:
+
+- `X` points Front (Forward).
+- `Y` points Left.
+- `Z` points Up.
+- Positive rotation (`theta`) means spinning Counter-Clockwise (Turning Left).
+
+When the firmware parses MPU9250 data, it handles the fact that the sensor is **upside-down** by perfectly inverting the
+`Y` and `Z` axes *before* any math runs.
+
+### The "Asynchronous Tick" Odometry Issue
+
+Because the hall effect minimum resolution is only 2 ticks per revolution, a straight line often triggers the left and
+right wheel ticks completely out of phase (e.g., Left ticks, then 5ms later Right ticks). If you track this purely with
+odometry, it simulates the robot taking microscopic "diagonal zig-zag" steps forward.
+
+**How the Kalman Filter solves this:**
+We actively use this zig-zag! In sequential sensor fusion, we process the odometry's fake "turn" as a measurement
+update. However, because the MPU9250 Gyroscope *simultaneously* reports that `0.0` degrees of rotation happened during
+that 5ms duration, the Kalman Filter's probability matrix evaluates them. Since our `r_theta_odom` (Wheel measurement
+noise) is significantly higher than our `q_theta` (Gyro process noise), the filter **rejects** the false odometry
+rotation!
+
+The result? The fake zig-zag is squashed mathematically, and only the forward `dx` momentum of the individual ticks
+survives the filter cycle. It results in a perfectly straight computed path.
+
 **The Position Filter handles Three Aspects:**
 
 1. **Prediction** leverages the *MPU9250 Accelerometer*. Because checking wheels with only 2 ticks/revolution provides

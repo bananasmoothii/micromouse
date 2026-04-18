@@ -10,6 +10,10 @@ use embedded_hal::i2c::I2c as _;
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l0x::RangeStatus::{PhaseFail, SignalFail};
 use vl53l0x::*;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+
+pub static VL53L0X_CHANNEL: Channel<CriticalSectionRawMutex, MeasurementData, 4> = Channel::new();
 
 /// VL53L0X Time-of-Flight distance sensor implementation
 ///
@@ -19,7 +23,6 @@ pub struct VL53L0XSensor {
     device: VL53L0x<I>,
     gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
     last_data: MeasurementData,
-    on_new_measurement: Option<&'static dyn Fn(&MeasurementData)>,
 }
 
 #[derive(Debug, Format)]
@@ -28,7 +31,7 @@ pub enum StartError {
     SpawnError(SpawnError),
 }
 
-#[derive(Debug, Format)]
+#[derive(Debug, Format, Clone, Copy)]
 pub struct MeasurementData {
     pub distance_mm: u16,
     pub status: RangeStatus,
@@ -68,16 +71,13 @@ impl VL53L0XSensor {
             device,
             gpio_interrupt: config.gpio_interrupt,
             last_data: MeasurementData::default(),
-            on_new_measurement: None,
         })
     }
 
     pub async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
-        callable: &'static dyn Fn(&MeasurementData),
     ) -> Result<(), StartError> {
-        self.on_new_measurement = Some(callable);
         self.device
             .start_continuous(0)
             .map_err(|e| StartError::I2cError(e))?;
@@ -108,10 +108,7 @@ async fn distance_sensor_task(self_: &'static mut VL53L0XSensor) -> ! {
                 };
                 if status != SignalFail && status != PhaseFail {
                     debug!("VL53L0X Distance: {} mm", distance_mm);
-                    self_.on_new_measurement.unwrap()(&self_.last_data);
-                    // if let Some(callback) = &self_.on_new_measurement {
-                    //     callback(&self_.last_data);
-                    // }
+                    let _ = VL53L0X_CHANNEL.try_send(self_.last_data);
                 }
             }
             Err(e) => {

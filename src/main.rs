@@ -7,7 +7,7 @@ mod i2c_devices;
 pub mod positioning;
 
 use crate::devices::battery::battery_monitoring_task;
-use crate::devices::hall_sensor_3144::hall_sensor_continuous_measuring;
+use crate::devices::hall_sensor_3144::{hall_sensor_continuous_measuring, WheelSide};
 use crate::devices::motors::{Motor, MotorDirection};
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
@@ -34,7 +34,6 @@ use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
 use crate::positioning::positioning_task;
-use crate::positioning::{ODOM_LEFT_CHANNEL, MPU_CHANNEL};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -137,20 +136,14 @@ async fn main(mut spawner: Spawner) {
         }
     };
 
-    imu.start_continuous_measurement(&mut spawner, &|data| {
-        let _ = MPU_CHANNEL.try_send(data.clone());
-    })
+    imu.start_continuous_measurement(&mut spawner)
         .await
         .unwrap();
 
 
-    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs), &|| {
-        let _ = ODOM_LEFT_CHANNEL.try_send(1); // Depending on motor direction, this can be -1
-    })).unwrap();
+    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs), WheelSide::Left)).unwrap();
 
-    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs), &|| {
-        let _ = positioning::ODOM_RIGHT_CHANNEL.try_send(1); // Depending on motor direction, this can be -1
-    })).unwrap();
+    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs), WheelSide::Right)).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);

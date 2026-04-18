@@ -64,11 +64,11 @@ impl SensorFusion {
         // --- 1D Kalman Filter for Theta ---
 
         // 1. Predict (using MPU gyro delta)
-        self.state.theta += mpu_delta.dtheta;
+        self.state.theta += mpu_delta.d_theta;
         self.p_theta += self.q_theta;
 
         // 2. Update (using Odometry delta)
-        let z_odom = odom_delta.dtheta - mpu_delta.dtheta; // Measurement residual
+        let z_odom = odom_delta.d_theta - mpu_delta.d_theta; // Measurement residual
 
         let s_odom = self.p_theta + self.r_theta_odom; // Innovation covariance
         let k_odom = self.p_theta / s_odom; // Kalman gain

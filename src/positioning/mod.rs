@@ -6,13 +6,9 @@ pub mod types;
 use self::types::MovementDelta;
 use defmt::info;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
 use mpu9250::MargMeasurements;
-
-// Using Channels makes life cleaner than handling callbacks within callbacks.
-pub static MPU_CHANNEL: Channel<CriticalSectionRawMutex, MargMeasurements<[f32; 3]>, 4> = Channel::new();
-pub static ODOM_LEFT_CHANNEL: Channel<CriticalSectionRawMutex, i32, 4> = Channel::new();
-pub static ODOM_RIGHT_CHANNEL: Channel<CriticalSectionRawMutex, i32, 4> = Channel::new();
+use crate::devices::mpu9250::MPU_CHANNEL;
+use crate::devices::hall_sensor_3144::{ODOM_LEFT_CHANNEL, ODOM_RIGHT_CHANNEL};
 
 #[embassy_executor::task]
 pub async fn positioning_task() {
@@ -23,7 +19,7 @@ pub async fn positioning_task() {
     loop {
         // Collect data from sensors
         let mut mpu_result = mpu::MpuResult {
-            delta: MovementDelta { dx: 0.0, dy: 0.0, dtheta: 0.0 },
+            delta: MovementDelta { dx: 0.0, dy: 0.0, d_theta: 0.0 },
             relative_mag: 0.0,
             dt: 0.02,
             accel_x: 0.0,

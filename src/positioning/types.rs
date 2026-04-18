@@ -13,5 +13,5 @@ pub struct Position2D {
 pub struct MovementDelta {
     pub dx: f32,
     pub dy: f32,
-    pub dtheta: f32,
+    pub d_theta: f32,
 }

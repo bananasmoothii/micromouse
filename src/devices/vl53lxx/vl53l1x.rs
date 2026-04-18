@@ -9,13 +9,16 @@ use embedded_hal::i2c::I2c as _;
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l1::RangeStatus::SIGNAL_FAIL;
 use vl53l1::*;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+
+pub static VL53L1X_CHANNEL: Channel<CriticalSectionRawMutex, RangingMeasurementData, 4> = Channel::new();
 
 pub struct VL53L1XSensor {
     device: Device,
     gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
     i2c: I,
     last_data: RangingMeasurementData,
-    on_new_measurement: Option<&'static dyn Fn(&RangingMeasurementData)>,
 }
 
 // I hate not being able to use generics due to the embassy task
@@ -79,7 +82,6 @@ impl VL53L1XSensor {
             gpio_interrupt: config.gpio_interrupt,
             i2c,
             last_data: RangingMeasurementData::default(),
-            on_new_measurement: None,
         })
     }
 
@@ -96,9 +98,7 @@ impl VL53L1XSensor {
     pub async fn start_continuous_measurement(
         &'static mut self,
         spawner: &mut Spawner,
-        callable: &'static dyn Fn(&RangingMeasurementData),
     ) -> Result<(), SpawnError> {
-        self.on_new_measurement = Some(callable);
         spawner.spawn(distance_sensor_task(self))
     }
 
@@ -189,10 +189,7 @@ async fn distance_sensor_task(self_: &'static mut VL53L1XSensor) -> ! {
                     //     rmd.range_status
                     // );
                     self_.last_data = rmd;
-                    self_.on_new_measurement.unwrap()(&self_.last_data);
-                    // if let Some(callback) = &self_.on_new_measurement {
-                    //     callback(&self_.last_data);
-                    // }
+                    let _ = VL53L1X_CHANNEL.try_send(self_.last_data.clone());
                 }
             }
             Err(e) => {
