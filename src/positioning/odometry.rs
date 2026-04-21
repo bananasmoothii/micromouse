@@ -2,38 +2,25 @@ use crate::positioning::types::MovementDelta;
 use core::f32::consts::PI;
 use micromath::F32Ext;
 
-#[derive(Clone, Copy, Debug)]
-pub struct OdometryConfig {
-    /// meters
-    pub wheel_radius: f32,
-    /// meters (distance between left and right wheels)
-    pub wheel_base: f32,
+/// Physical radius of the wheels in meters. Matches the actual tire size.
+pub const WHEEL_RADIUS: f32 = 0.020;
 
-    pub ticks_per_revolution: f32,
-}
+/// Distance between the two differential wheels in meters (track width).
+pub const WHEEL_BASE: f32 = 0.078;
 
-impl Default for OdometryConfig {
-    fn default() -> Self {
-        Self {
-            wheel_radius: 0.020,
-            wheel_base: 0.078,
-            ticks_per_revolution: 2.0, // Very low resolution, requires accelerometer interpolation
-        }
-    }
-}
+/// Raw odometry resolution: Number of hall effect ticks generated per full wheel revolution.
+pub const TICKS_PER_REVOLUTION: f32 = 2.0;
 
 pub struct OdometryProcessor {
-    config: OdometryConfig,
     left_ticks: i32,
     right_ticks: i32,
     distance_per_tick: f32,
 }
 
 impl OdometryProcessor {
-    pub fn new(config: OdometryConfig) -> Self {
-        let distance_per_tick = 2.0 * PI * config.wheel_radius / config.ticks_per_revolution;
+    pub fn new() -> Self {
+        let distance_per_tick = 2.0 * PI * WHEEL_RADIUS / TICKS_PER_REVOLUTION;
         Self {
-            config,
             left_ticks: 0,
             right_ticks: 0,
             distance_per_tick,
@@ -55,7 +42,7 @@ impl OdometryProcessor {
         self.right_ticks = 0;
 
         let d_center = (d_right + d_left) / 2.0;
-        let d_theta = (d_right - d_left) / self.config.wheel_base;
+        let d_theta = (d_right - d_left) / WHEEL_BASE;
 
         let dx;
         let dy;

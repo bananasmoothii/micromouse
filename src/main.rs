@@ -8,7 +8,7 @@ pub mod positioning;
 
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::hall_sensor_3144::{hall_sensor_continuous_measuring, WheelSide};
-use crate::devices::motors::{Motor, MotorDirection};
+use crate::devices::motors::Motor;
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
 use crate::i2c_devices::init_i2c_devices;
@@ -170,7 +170,6 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
 
 #[embassy_executor::task]
 async fn motor_task(mut motor1: Motor<'static, TIM3>) {
-    motor1.set_direction(MotorDirection::Forward);
 
     // minimum speed percentage seems to be 9%
     for i in 9..=100 {

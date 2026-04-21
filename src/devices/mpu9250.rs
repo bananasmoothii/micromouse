@@ -10,13 +10,14 @@ use embassy_stm32::spi::mode::Master;
 use embassy_stm32::time::Hertz;
 use embassy_time::Delay;
 use mpu9250::{
-    Error, InterruptConfig, InterruptEnable, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice,
+    Error, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice,
     SpiError,
 };
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
+use embassy_sync::blocking_mutex::Mutex;
+use core::cell::Cell;
 
-pub static MPU_CHANNEL: Channel<CriticalSectionRawMutex, MargMeasurements<[f32; 3]>, 4> = Channel::new();
+pub static LATEST_MPU: Mutex<CriticalSectionRawMutex, Cell<Option<MargMeasurements<[f32; 3]>>>> = Mutex::new(Cell::new(None));
 
 pub struct Mpu9250Sensor {
     device: Mpu9250<SpiDevice<Spi<'static, Async, Master>, Output<'static>>, Marg>,
@@ -57,10 +58,12 @@ impl Mpu9250Sensor {
 
     fn on_data_ready(&mut self) {
         match self.device.all() {
-            Ok(data) => self.last_data = data,
+            Ok(data) => {
+                self.last_data = data;
+                LATEST_MPU.lock(|cell| cell.set(Some(data)));
+            },
             Err(e) => defmt::error!("Failed to read sensor data: {}", e),
         }
-        let _ = MPU_CHANNEL.try_send(self.last_data);
     }
 
     pub async fn start_continuous_measurement(
