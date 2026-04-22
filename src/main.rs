@@ -5,6 +5,7 @@ extern crate alloc;
 mod devices;
 mod i2c_devices;
 pub mod positioning;
+mod labyrinth;
 
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::hall_sensor_3144::{hall_sensor_continuous_measuring, WheelSide};
@@ -33,12 +34,13 @@ use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
+use crate::labyrinth::Labyrinth;
 use crate::positioning::positioning_task;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 const HEAP_SIZE: usize = // Add all big structs here !
-    size_of::<VL53L0XSensor>() + size_of::<VL53L1XSensor>() + size_of::<Mpu9250Sensor>() + 500;
+    size_of::<VL53L0XSensor>() + size_of::<VL53L1XSensor>() + size_of::<Mpu9250Sensor>() + size_of::<Labyrinth>() + 1024;
 
 bind_interrupts!(
     struct Irqs {
