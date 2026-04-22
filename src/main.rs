@@ -6,7 +6,6 @@ mod devices;
 mod i2c_devices;
 pub mod positioning;
 mod trajectory;
-mod labyrinth;
 pub mod dimensions;
 
 use crate::devices::battery::battery_monitoring_task;
