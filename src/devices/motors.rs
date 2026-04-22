@@ -1,3 +1,4 @@
+use core::cell::Cell;
 use defmt::{error, trace, warn};
 use embassy_executor::Spawner;
 use embassy_stm32::adc::{Adc, SampleTime};
@@ -10,7 +11,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
 use core::sync::atomic::Ordering;
 use embassy_time::{Duration, Timer};
-use core::f32::consts::PI;
+use core::f32::consts::{PI, TAU};
+use crate::positioning::CURRENT_STATE;
 
 pub const DT: f32 = 0.02; // 20ms control loop iteration length
 
@@ -42,6 +44,10 @@ pub const KP: f32 = 0.5;
 /// despite battery voltage sag preventing standard PWM ratios from reaching top speed.
 pub const KI: f32 = 0.1;
 
+fn angle(angle: f32) -> f32 {
+    (angle + PI) % TAU - PI
+}
+
 /// Asynchronous task that consumes a trajectory over `PATH_CHANNEL`,
 /// derives continuous PI-controlled PWM to both differential wheels,
 /// and corrects physical deviations dynamically using Odometry atomic ticks.
@@ -58,7 +64,7 @@ pub async fn motor_controller_task(
     let mut left_integral = 0.0;
     let mut right_integral = 0.0;
 
-    let mut last_target = PathPoint::default();
+    //let mut last_target = PathPoint::default();
     let mut has_first_point = false;
 
     loop {
@@ -67,17 +73,20 @@ pub async fn motor_controller_task(
 
         // Try reading next path point
         if let Ok(next_point) = PATH_CHANNEL.try_receive() {
+            let state = CURRENT_STATE.lock(Cell::get);
+            let estim_pos = PathPoint {x: state.x, y: state.y, theta: state.theta};
+
             if has_first_point {
                 // Calculate required velocities to get from last target to this target in exactly DT.
-                let dx = next_point.x - last_target.x;
-                let dy = next_point.y - last_target.y;
-                let d_theta = next_point.theta - last_target.theta;
+                let dx = next_point.x - estim_pos.x;
+                let dy = next_point.y - estim_pos.y;
+                let d_theta = angle(next_point.theta - estim_pos.theta);
 
                 target_lin = micromath::F32Ext::sqrt(dx * dx + dy * dy) / DT;
                 // If robot goes backwards, we'd need a sign check here, but for micromouse forward splines:
                 target_ang = d_theta / DT;
             }
-            last_target = next_point;
+            //last_target = next_point;
             has_first_point = true;
         } else {
             // Un-set if we run out of path points (stops smoothly)

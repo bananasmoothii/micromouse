@@ -5,6 +5,9 @@ extern crate alloc;
 mod devices;
 mod i2c_devices;
 pub mod positioning;
+mod trajectory;
+mod labyrinth;
+pub mod dimensions;
 
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::hall_sensor_3144::{hall_sensor_continuous_measuring, WheelSide};

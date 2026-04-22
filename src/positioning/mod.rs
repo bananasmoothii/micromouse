@@ -3,11 +3,23 @@ pub mod mpu;
 pub mod odometry;
 pub mod types;
 
+use core::cell::Cell;
 use self::types::MovementDelta;
 use defmt::info;
 use crate::devices::mpu9250::LATEST_MPU;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
 use core::sync::atomic::Ordering;
+use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use crate::positioning::types::Position2D;
+
+pub static CURRENT_STATE: Mutex<CriticalSectionRawMutex, Cell<Position2D>> = Mutex::new(Cell::new(Position2D {
+    x: 0.0,
+    y: 0.0,
+    theta: 0.0,
+    v_x: 0.0,
+    v_y: 0.0,
+}));
 
 #[embassy_executor::task]
 pub async fn positioning_task() {
@@ -46,6 +58,7 @@ pub async fn positioning_task() {
 
         let state = fusion_proc.update(odom_delta, mpu_result);
         info!("Position -> X: {}, Y: {}, Theta: {}", state.x, state.y, state.theta);
+        CURRENT_STATE.lock(|cell| cell.set(state));
 
         // Processing loop rate
         embassy_time::Timer::after_millis(20).await;
