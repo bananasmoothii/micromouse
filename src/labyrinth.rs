@@ -35,7 +35,7 @@ pub struct Labyrinth {
 }
 
 impl Wall {
-    fn is_present(self) -> bool {
+    pub fn is_present(self) -> bool {
         match self {
             Wall::NormalWall { hits, misses } => hits > misses,
             Wall::BorderWall => true,
