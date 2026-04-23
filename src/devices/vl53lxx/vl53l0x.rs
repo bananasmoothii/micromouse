@@ -1,6 +1,6 @@
 use crate::devices::vl53lxx::Config;
 use core::fmt::Debug;
-use defmt::{Format, debug, warn, trace};
+use defmt::{Format, debug, warn};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};

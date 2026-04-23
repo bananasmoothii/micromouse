@@ -1,7 +1,6 @@
 use core::convert::Infallible;
-use defmt::{info, trace};
+use defmt::info;
 use embassy_executor::{SpawnError, Spawner};
-use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::spi;
@@ -21,7 +20,7 @@ pub static LATEST_MPU: Mutex<CriticalSectionRawMutex, Cell<Option<MargMeasuremen
 
 pub struct Mpu9250Sensor {
     device: Mpu9250<SpiDevice<Spi<'static, Async, Master>, Output<'static>>, Marg>,
-    gpio_interrupt: ExtiInput<'static>,
+    // gpio_interrupt: ExtiInput<'static>,
     last_data: MargMeasurements<[f32; 3]>,
 }
 
@@ -29,10 +28,10 @@ impl Mpu9250Sensor {
     pub(crate) fn init_new(
         com: Spi<'static, Async, Master>,
         ncs: Output<'static>,
-        gpio_interrupt: ExtiInput<'static>,
+        // gpio_interrupt: ExtiInput<'static>,
     ) -> Result<Self, Error<SpiError<spi::Error, Infallible>>> {
         info!("Initializing MPU9250 via SPI...");
-        let mut device =
+        let device =
             Mpu9250::marg_with_reinit(com, ncs, &mut Delay, &mut MpuConfig::marg(), |mut spi, ncs| {
                 let mut new_spi_config = spi::Config::default();
                 // even though the MPU9250 supports up to 20MHz, the max kernel clock for this pin on STM32F446RE is 16MHz.
@@ -46,7 +45,7 @@ impl Mpu9250Sensor {
         info!("MPU9250 initialized successfully");
         Ok(Self {
             device,
-            gpio_interrupt,
+            // gpio_interrupt,
             last_data: MargMeasurements {
                 accel: [0.0; 3],
                 gyro: [0.0; 3],

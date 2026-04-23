@@ -14,23 +14,17 @@ use crate::devices::hall_sensor_3144::{hall_sensor_continuous_measuring, WheelSi
 use crate::devices::motors::Motor;
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
-use crate::i2c_devices::init_i2c_devices;
 use alloc::boxed::Box;
-use alloc::vec;
 use alloc::vec::Vec;
 use defmt::*;
 use defmt_rtt as _;
 use devices::vl53lxx::vl53l1x::VL53L1XSensor;
 use embassy_executor::Spawner;
-use embassy_stm32::adc::{Adc, SampleTime};
+use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::{self, ExtiInput};
-use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
+use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::peripherals::{I2C1, TIM3};
 use embassy_stm32::spi::Spi;
-use embassy_stm32::time::Hertz;
-use embassy_stm32::timer::Channel;
-use embassy_stm32::timer::low_level::CountingMode;
-use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
@@ -41,15 +35,17 @@ use crate::positioning::positioning_task;
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 const HEAP_SIZE: usize = // Add all big structs here !
-    size_of::<VL53L0XSensor>() + size_of::<VL53L1XSensor>() + size_of::<Mpu9250Sensor>() + 500;
+    size_of::<VL53L0XSensor>() + size_of::<VL53L1XSensor>() + size_of::<Mpu9250Sensor>() + 10000;
 
 bind_interrupts!(
     struct Irqs {
-        EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
         EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
         EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
         EXTI2 => exti::InterruptHandler<interrupt::typelevel::EXTI2>;
         EXTI3 => exti::InterruptHandler<interrupt::typelevel::EXTI3>;
+        EXTI4 => exti::InterruptHandler<interrupt::typelevel::EXTI4>;
+        EXTI9_5 => exti::InterruptHandler<interrupt::typelevel::EXTI9_5>;
+        EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
         I2C1_EV => i2c::EventInterruptHandler<I2C1>;
         I2C1_ER => i2c::ErrorInterruptHandler<I2C1>;
     }
@@ -62,7 +58,9 @@ async fn main(mut spawner: Spawner) {
         embedded_alloc::init!(HEAP, HEAP_SIZE);
     }
 
-    let mut p = embassy_stm32::init(Default::default());
+    // poc_trajectory_svg();
+
+    let p = embassy_stm32::init(Default::default());
 
     spawner
         .spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0))
@@ -81,12 +79,14 @@ async fn main(mut spawner: Spawner) {
         p.DMA1_CH0,
         Irqs,
         vec![
-            Output::new(p.PC9, Level::Low, Speed::Low),
-            Output::new(p.PC8, Level::Low, Speed::Low),
+            Output::new(p.PB13, Level::Low, Speed::Low),
+            Output::new(p.PB14, Level::Low, Speed::Low),
+            Output::new(p.PB15, Level::Low, Speed::Low),
         ],
         vec![
-            ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs),
-            ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs),
+            ExtiInput::new(p.PC5, p.EXTI5, Pull::None, Irqs),
+            ExtiInput::new(p.PC6, p.EXTI6, Pull::None, Irqs),
+            ExtiInput::new(p.PC8, p.EXTI8, Pull::None, Irqs),
         ],
     )
         .await;
@@ -105,16 +105,16 @@ async fn main(mut spawner: Spawner) {
     let spi = Spi::new(
         p.SPI1,     //
         p.PB3,      // SCK
-        p.PB5,      // MOSI / SDA
-        p.PB4,      // MISO (with internal pull-down to prevent floating)
+        p.PA7,      // MOSI / SDA
+        p.PA6,      // MISO (with internal pull-down to prevent floating)
         p.DMA2_CH3, //
         p.DMA2_CH2, //
         spi_config,
     );
 
     info!("Setting up chip select (CS)...");
-    let mut chip_select = Output::new(p.PC6, Level::High, Speed::Medium);
-    let interrupt = ExtiInput::new(p.PA2, p.EXTI2, Pull::None, Irqs);
+    let mut chip_select = Output::new(p.PC12, Level::High, Speed::Low);
+    // let interrupt = ExtiInput::new(p.PA2, p.EXTI2, Pull::None, Irqs);
 
     // MPU9250 requires CS to be high during power-on to enable SPI mode
     // Pulse CS to ensure the chip recognizes SPI mode
@@ -126,9 +126,7 @@ async fn main(mut spawner: Spawner) {
 
     info!("Initializing MPU9250 IMU...");
 
-    let imu =
-        Mpu9250Sensor::init_new(spi, chip_select, interrupt);
-    let imu = match imu {
+    let imu = match Mpu9250Sensor::init_new(spi, chip_select) {
         Ok(s) => {
             info!("IMU initialized successfully");
             Box::leak(Box::new(s))
@@ -144,9 +142,9 @@ async fn main(mut spawner: Spawner) {
         .unwrap();
 
 
-    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA0, p.EXTI0, Pull::None, Irqs), WheelSide::Left)).unwrap();
+    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PC2, p.EXTI2, Pull::None, Irqs), WheelSide::Left)).unwrap();
 
-    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs), WheelSide::Right)).unwrap();
+    spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PC3, p.EXTI3, Pull::None, Irqs), WheelSide::Right)).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
@@ -193,3 +191,58 @@ async fn motor_task(mut motor1: Motor<'static, TIM3>) {
     //     Timer::after(Duration::from_secs(1)).await;
     // }
 }
+
+fn poc_trajectory_svg() {
+    use crate::trajectory::{Trajectory, TrajectoryOptimizer, SmoothCornerOptimizer, VelocityProfileOptimizer};
+    use crate::labyrinth::Labyrinth;
+
+    info!("--- SVG POC START ---");
+    let mut lab = Labyrinth::new();
+
+    // Create a simple zig-zag obstacle course
+    lab.ray_east_wall(4, 0, true);
+    lab.ray_east_wall(4, 1, true);
+    lab.ray_east_wall(4, 2, true);
+    lab.ray_east_wall(4, 3, true);
+
+    lab.ray_south_wall(5, 4, true);
+    lab.ray_south_wall(6, 4, true);
+    lab.ray_south_wall(7, 4, true);
+
+    lab.update_cell_distance(0, 0); // Recompute distances based on walls
+
+    let raw_traj = Trajectory::build_from_labyrinth(&lab, 0, 0);
+
+    // 1. Smooth corners
+    let smooth_opt = SmoothCornerOptimizer {
+        radius: trajectory::config::CORNER_RADIUS,
+        corner_speed: trajectory::config::CORNER_SPEED,
+    };
+    let traj_smooth = smooth_opt.optimize(raw_traj);
+
+    // 2. Trapezoidal velocity profiling
+    let vel_opt = VelocityProfileOptimizer {
+        max_acceleration: trajectory::config::MAX_ACCELERATION
+    };
+    let traj_opt = vel_opt.optimize(traj_smooth);
+
+    // Simulate to get points
+    let points = traj_opt.simulate(0.0, 0.0, 0.0);
+
+    // Print raw points as SVG polyline.
+    // println outputs raw text without timestamp or level.
+    println!("<svg viewBox=\"-0.1 -0.1 3.0 3.0\" xmlns=\"http://www.w3.org/2000/svg\">");
+    println!("<polyline points=\"");
+    for p in points {
+        println!("{},{}", p.0, p.1);
+    }
+    println!("\" fill=\"none\" stroke=\"red\" stroke-width=\"0.02\"/>");
+    println!("</svg>");
+    info!("--- SVG POC END ---");
+
+    // Hang forever so the rest of the firmware doesn't interfere
+    loop {
+        cortex_m::asm::wfi();
+    }
+}
+

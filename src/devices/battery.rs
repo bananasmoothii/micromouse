@@ -1,5 +1,5 @@
 use alloc::format;
-use defmt::{debug, info};
+use defmt::info;
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::{Peri, peripherals};
 use embassy_time::{Duration, Timer};

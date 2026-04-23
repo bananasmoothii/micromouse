@@ -1,11 +1,11 @@
 use core::cell::Cell;
-use defmt::{error, trace, warn};
+use defmt::error;
 use embassy_executor::Spawner;
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
-use embassy_stm32::{Peri, peripherals, PeripheralType};
+use embassy_stm32::{Peri, peripherals};
 use embassy_sync::channel::Channel as SyncChannel;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
@@ -198,7 +198,14 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
             self.in_b.set_high();
         }
 
-        let duty = (self.pwm.max_duty_cycle() as f32 * speed.abs()) as u32;
+        // --- DEADBAND COMPENSATION ---
+        // DC Motors cannot run below a certain PWM threshold (approx 20%).
+        // We remap the logical (0.0, 1.0] speed to [MIN_PWM, 1.0].
+        const MIN_PWM: f32 = 0.20;
+        let abs_speed = speed.abs();
+        let effective_speed = MIN_PWM + abs_speed * (1.0 - MIN_PWM);
+
+        let duty = (self.pwm.max_duty_cycle() as f32 * effective_speed) as u32;
 
         let mut pwm_channel = self.pwm.channel(self.pwm_channel);
         pwm_channel.set_duty_cycle(duty);
