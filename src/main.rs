@@ -7,6 +7,7 @@ mod i2c_devices;
 pub mod positioning;
 mod trajectory;
 pub mod dimensions;
+mod labyrinth;
 
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::hall_sensor_3144::{hall_sensor_continuous_measuring, WheelSide};
