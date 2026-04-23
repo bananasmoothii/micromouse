@@ -23,7 +23,12 @@ impl MpuProcessor {
     }
 
     /// Process raw data from MPU9250 to determine rotational change in yaw (heading).
-    pub fn update(&mut self, mut accel: [f32; 3], mut gyro: [f32; 3], mut mag: [f32; 3]) -> MpuResult {
+    pub fn update(
+        &mut self,
+        mut accel: [f32; 3],
+        mut gyro: [f32; 3],
+        mut mag: [f32; 3],
+    ) -> MpuResult {
         let now = Instant::now();
 
         // Invert Y and Z per upside-down configuration
@@ -55,8 +60,12 @@ impl MpuProcessor {
 
         // Normalize compass heading relative to start direction [-PI, PI]
         let mut relative_mag = absolute_mag - initial;
-        while relative_mag > core::f32::consts::PI { relative_mag -= 2.0 * core::f32::consts::PI; }
-        while relative_mag < -core::f32::consts::PI { relative_mag += 2.0 * core::f32::consts::PI; }
+        while relative_mag > core::f32::consts::PI {
+            relative_mag -= 2.0 * core::f32::consts::PI;
+        }
+        while relative_mag < -core::f32::consts::PI {
+            relative_mag += 2.0 * core::f32::consts::PI;
+        }
 
         let delta = MovementDelta {
             dx: 0.0,

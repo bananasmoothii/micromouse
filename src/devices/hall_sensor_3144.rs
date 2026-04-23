@@ -1,5 +1,5 @@
-use embassy_stm32::exti::ExtiInput;
 use core::sync::atomic::{AtomicI32, Ordering};
+use embassy_stm32::exti::ExtiInput;
 
 pub static LEFT_TICKS_TOTAL: AtomicI32 = AtomicI32::new(0);
 pub static RIGHT_TICKS_TOTAL: AtomicI32 = AtomicI32::new(0);

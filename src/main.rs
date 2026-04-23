@@ -7,11 +7,12 @@ mod i2c_devices;
 pub mod positioning;
 
 use crate::devices::battery::battery_monitoring_task;
-use crate::devices::hall_sensor_3144::{hall_sensor_continuous_measuring, WheelSide};
+use crate::devices::hall_sensor_3144::{WheelSide, hall_sensor_continuous_measuring};
 use crate::devices::motors::Motor;
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
 use crate::i2c_devices::init_i2c_devices;
+use crate::positioning::positioning_task;
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -33,7 +34,6 @@ use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
-use crate::positioning::positioning_task;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -64,6 +64,44 @@ async fn main(mut spawner: Spawner) {
     spawner
         .spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0))
         .unwrap();
+
+    let pwm1_pin = PwmPin::new(p.PB4, OutputType::PushPull);
+    let pwm1 = SimplePwm::new(
+        p.TIM3,
+        Some(pwm1_pin),
+        None,
+        None,
+        None,
+        Hertz::khz(15),
+        CountingMode::EdgeAlignedUp,
+    );
+
+    let pwm2_pin = PwmPin::new(p.PB10, OutputType::PushPull);
+    let pwm2 = SimplePwm::new(
+        p.TIM2,
+        None,
+        None,
+        Some(pwm2_pin),
+        None,
+        Hertz::khz(15),
+        CountingMode::EdgeAlignedUp,
+    );
+
+    let mut motor1 = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1);
+    let mut motor2 = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3);
+    // motor1.set_speed(0.25);
+    // motor2.set_speed(0.25);
+    // info!("speed set");
+    // spawner.spawn(motor_task(motor1)).unwrap();
+
+    // Start overcurrent protection
+    spawner.spawn(devices::motors::overcurrent_protection_task(
+        Adc::new(p.ADC2),
+        p.PA0,
+        p.PA1,
+    )).unwrap();
+
+    /*
 
     // Start Positioning task
     spawner.spawn(positioning_task()).unwrap();
@@ -145,6 +183,8 @@ async fn main(mut spawner: Spawner) {
 
     spawner.spawn(hall_sensor_continuous_measuring(ExtiInput::new(p.PA1, p.EXTI1, Pull::None, Irqs), WheelSide::Right)).unwrap();
 
+     */
+
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
 
@@ -166,27 +206,4 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
             action()
         }
     }
-}
-
-#[embassy_executor::task]
-async fn motor_task(mut motor1: Motor<'static, TIM3>) {
-
-    // minimum speed percentage seems to be 9%
-    for i in 9..=100 {
-        motor1.set_speed(i as f32 * 0.01);
-        info!("speed: {}%", i);
-        Timer::after(Duration::from_millis(100)).await;
-    }
-    info!("reached max speed");
-
-    // if this function ends, pins are dropped and the motor halts
-    Timer::after(Duration::from_secs(5000)).await;
-
-    // motor1.set_speed(0.5);
-    // loop {
-    //     motor1.set_direction(MotorDirection::Forward);
-    //     Timer::after(Duration::from_secs(1)).await;
-    //     motor1.set_direction(MotorDirection::Reverse);
-    //     Timer::after(Duration::from_secs(1)).await;
-    // }
 }

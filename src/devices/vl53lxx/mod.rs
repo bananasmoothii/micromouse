@@ -1,8 +1,8 @@
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
 
-pub mod vl53l1x;
 pub mod vl53l0x;
+pub mod vl53l1x;
 
 /// Configuration for the VL53LXX distance sensors
 pub struct Config {

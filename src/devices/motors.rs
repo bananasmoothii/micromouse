@@ -1,16 +1,16 @@
+use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
+use core::f32::consts::PI;
+use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{error, trace, warn};
 use embassy_executor::Spawner;
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
-use embassy_stm32::{Peri, peripherals, PeripheralType};
-use embassy_sync::channel::Channel as SyncChannel;
+use embassy_stm32::{Peri, PeripheralType, peripherals};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
-use core::sync::atomic::Ordering;
+use embassy_sync::channel::Channel as SyncChannel;
 use embassy_time::{Duration, Timer};
-use core::f32::consts::PI;
 
 pub const DT: f32 = 0.02; // 20ms control loop iteration length
 
@@ -23,7 +23,10 @@ pub struct PathPoint {
 
 pub static PATH_CHANNEL: SyncChannel<CriticalSectionRawMutex, PathPoint, 32> = SyncChannel::new();
 
-use crate::positioning::odometry::{WHEEL_RADIUS, WHEEL_BASE, TICKS_PER_REVOLUTION};
+/// Global flag set by the overcurrent protection task to immediately halt motors
+pub static OVERCURRENT_FAULT: AtomicBool = AtomicBool::new(false);
+
+use crate::positioning::odometry::{TICKS_PER_REVOLUTION, WHEEL_BASE, WHEEL_RADIUS};
 
 // NOTE regarding concurrency design:
 // By using `AtomicI32` for incremental odometry ticks we avoid dropped packets.
@@ -48,7 +51,7 @@ pub const KI: f32 = 0.1;
 #[embassy_executor::task]
 pub async fn motor_controller_task(
     mut left_motor: Motor<'static, peripherals::TIM3>,
-    mut right_motor: Motor<'static, peripherals::TIM4>, // assuming TIM4 or whatever they are typed
+    mut right_motor: Motor<'static, peripherals::TIM2>,
 ) {
     let distance_per_tick = 2.0 * PI * WHEEL_RADIUS / TICKS_PER_REVOLUTION;
 
@@ -60,8 +63,20 @@ pub async fn motor_controller_task(
 
     let mut last_target = PathPoint::default();
     let mut has_first_point = false;
+    let mut fault_logged = false;
 
     loop {
+        if OVERCURRENT_FAULT.load(Ordering::Relaxed) {
+            if !fault_logged {
+                error!("Motors halted due to overcurrent fault!");
+                fault_logged = true;
+            }
+            left_motor.brake();
+            right_motor.brake();
+            Timer::after(Duration::from_millis(100)).await;
+            continue;
+        }
+
         let mut target_lin = 0.0;
         let mut target_ang = 0.0;
 
@@ -141,26 +156,13 @@ pub struct Motor<'d, T: GeneralInstance4Channel> {
 
 impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
     pub fn new(
-        spawner: &Spawner,
         in_a_pin: Peri<'d, impl Pin>,
         in_b_pin: Peri<'d, impl Pin>,
         pwm: SimplePwm<'d, T>,
         pwm_channel: Channel,
-        adc_module: Adc<'static, peripherals::ADC2>,
-        current_sense_pin: Peri<'static, peripherals::PA4>,
-        enable_pin: Peri<'static, impl Pin>,
     ) -> Self {
         let in_a = Output::new(in_a_pin, Level::Low, Speed::Medium);
         let in_b = Output::new(in_b_pin, Level::Low, Speed::Medium);
-        let enable_output = Output::new(enable_pin, Level::Low, Speed::Medium);
-
-        spawner
-            .spawn(overcurrent_protection_task(
-                adc_module,
-                current_sense_pin,
-                enable_output,
-            ))
-            .unwrap();
 
         Self {
             in_a,
@@ -219,11 +221,9 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
 #[embassy_executor::task]
 pub async fn overcurrent_protection_task(
     mut adc_module: Adc<'static, peripherals::ADC2>,
-    mut current_sense_pin: Peri<'static, peripherals::PA4>,
-    mut enable_pin: Output<'static>,
+    mut sense_motor1: Peri<'static, peripherals::PA0>,
+    mut sense_motor2: Peri<'static, peripherals::PA1>,
 ) -> ! {
-    enable_pin.set_high();
-
     // Constantes basées sur la datasheet VNH2SP30
     const K: f32 = 11370.0; // Ratio typique
     const R_SENSE: f32 = 1500.0; // Résistance sur le shield en Ohms
@@ -231,35 +231,40 @@ pub async fn overcurrent_protection_task(
     const V_REF: f32 = 3.3; // Tension de référence Nucleo
 
     loop {
-        // Read the raw 12-bit value from the ADC
-        // Take a burst of 10 samples to ensure we catch the PWM "ON" phase
-        let mut max_raw = 0;
+        // Motor 1
+        let mut max_raw1 = 0;
         for _ in 0..20 {
-            let raw = adc_module.blocking_read(&mut current_sense_pin, SampleTime::CYCLES144);
-            if raw > max_raw {
-                max_raw = raw;
+            let raw = adc_module.blocking_read(&mut sense_motor1, SampleTime::CYCLES144);
+            if raw > max_raw1 {
+                max_raw1 = raw;
             }
         }
 
-        // 1. Convert raw ADC value to Voltage
-        // $V_{SENSE} = (raw / 4095) * 3.3V$
-        let v_sense = (max_raw as f32 / ADC_MAX) * V_REF;
-
-        // 2. Convert Voltage to Sense Current (using Ohm's Law: I = V/R)
-        // $I_{SENSE} = V_{SENSE} / 1500\Omega$
-        let i_sense = v_sense / R_SENSE;
-
-        // 3. Convert Sense Current to actual Motor Current
-        // $I_{OUT} = I_{SENSE} * K$
-        let current_amps = i_sense * K;
-
-        if current_amps > 4.0 {
-            error!("Overcurrent ! {} A (raw: {})", current_amps, max_raw);
-            enable_pin.set_low();
-            panic!("Overcurrent detected");
+        // Motor 2
+        let mut max_raw2 = 0;
+        for _ in 0..20 {
+            let raw = adc_module.blocking_read(&mut sense_motor2, SampleTime::CYCLES144);
+            if raw > max_raw2 {
+                max_raw2 = raw;
+            }
         }
 
-        // trace!("current: {} A (raw: {})", current_amps, max_raw);
+        let v_sense1 = (max_raw1 as f32 / ADC_MAX) * V_REF;
+        let v_sense2 = (max_raw2 as f32 / ADC_MAX) * V_REF;
+
+        let current_amps1 = (v_sense1 / R_SENSE) * K;
+        let current_amps2 = (v_sense2 / R_SENSE) * K;
+
+        if current_amps1 > 4.0 || current_amps2 > 4.0 {
+            error!("Overcurrent ! M1: {} A, M2: {} A", current_amps1, current_amps2);
+            OVERCURRENT_FAULT.store(true, Ordering::Relaxed);
+
+            // Wait 5 seconds before attempting recovery
+            Timer::after(Duration::from_secs(5)).await;
+
+            // Optional auto-recovery:
+            // OVERCURRENT_FAULT.store(false, Ordering::Relaxed);
+        }
 
         Timer::after(Duration::from_millis(20)).await;
     }

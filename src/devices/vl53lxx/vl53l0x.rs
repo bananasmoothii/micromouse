@@ -1,17 +1,17 @@
 use crate::devices::vl53lxx::Config;
 use core::fmt::Debug;
-use defmt::{Format, debug, warn, trace};
+use defmt::{Format, debug, trace, warn};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use embedded_hal::i2c::I2c as _;
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l0x::RangeStatus::{PhaseFail, SignalFail};
 use vl53l0x::*;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
 
 pub static VL53L0X_CHANNEL: Channel<CriticalSectionRawMutex, MeasurementData, 4> = Channel::new();
 

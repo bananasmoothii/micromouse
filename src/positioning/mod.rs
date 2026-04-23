@@ -4,10 +4,10 @@ pub mod odometry;
 pub mod types;
 
 use self::types::MovementDelta;
-use defmt::info;
-use crate::devices::mpu9250::LATEST_MPU;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
+use crate::devices::mpu9250::LATEST_MPU;
 use core::sync::atomic::Ordering;
+use defmt::info;
 
 #[embassy_executor::task]
 pub async fn positioning_task() {
@@ -21,7 +21,11 @@ pub async fn positioning_task() {
     loop {
         // Collect data from sensors
         let mut mpu_result = mpu::MpuResult {
-            delta: MovementDelta { dx: 0.0, dy: 0.0, d_theta: 0.0 },
+            delta: MovementDelta {
+                dx: 0.0,
+                dy: 0.0,
+                d_theta: 0.0,
+            },
             relative_mag: 0.0,
             dt: 0.02,
             accel_x: 0.0,
@@ -45,7 +49,10 @@ pub async fn positioning_task() {
         let odom_delta = odom_proc.update();
 
         let state = fusion_proc.update(odom_delta, mpu_result);
-        info!("Position -> X: {}, Y: {}, Theta: {}", state.x, state.y, state.theta);
+        info!(
+            "Position -> X: {}, Y: {}, Theta: {}",
+            state.x, state.y, state.theta
+        );
 
         // Processing loop rate
         embassy_time::Timer::after_millis(20).await;

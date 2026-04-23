@@ -1,6 +1,6 @@
-use core::f32::consts::PI;
-use crate::positioning::types::{MovementDelta, Position2D};
 use crate::positioning::mpu::MpuResult;
+use crate::positioning::types::{MovementDelta, Position2D};
+use core::f32::consts::PI;
 use micromath::F32Ext;
 
 pub struct SensorFusion {
@@ -49,7 +49,7 @@ impl SensorFusion {
             r_theta_odom: 0.05,
             r_theta_mag: 10.0, // High noise -> weak but steady long-term correction
             p_xy: 1.0,
-            q_xy: 0.005, // Acceleration noise per step
+            q_xy: 0.005,     // Acceleration noise per step
             r_xy_odom: 0.02, // Trust bounds for wheel slippage and chunky resolution
         }
     }
@@ -78,8 +78,12 @@ impl SensorFusion {
 
         // 3. Update (using Magnetometer absolute heading)
         let mut z_mag = mag_heading - self.state.theta;
-        while z_mag > PI { z_mag -= 2.0 * PI; }
-        while z_mag < -PI { z_mag += 2.0 * PI; }
+        while z_mag > PI {
+            z_mag -= 2.0 * PI;
+        }
+        while z_mag < -PI {
+            z_mag += 2.0 * PI;
+        }
 
         let s_mag = self.p_theta + self.r_theta_mag;
         let k_mag = self.p_theta / s_mag;
@@ -88,8 +92,12 @@ impl SensorFusion {
         self.p_theta = (1.0 - k_mag) * self.p_theta;
 
         // Normalize theta to [-PI, PI] to keep math clean
-        while self.state.theta > PI { self.state.theta -= 2.0 * PI; }
-        while self.state.theta < -PI { self.state.theta += 2.0 * PI; }
+        while self.state.theta > PI {
+            self.state.theta -= 2.0 * PI;
+        }
+        while self.state.theta < -PI {
+            self.state.theta += 2.0 * PI;
+        }
 
         let (sin_theta, cos_theta) = self.state.theta.sin_cos();
 
