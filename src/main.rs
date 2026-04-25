@@ -87,11 +87,11 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-    for i in 1..=30 {
+    for freq in [523, 659, 784, 1047] {
         BUZZER_CHANNEL
             .send(BuzzerTask {
-                freq: Hertz::hz(i * 100),
-                duration: Duration::from_millis(20),
+                freq: Hertz::hz(freq),
+                duration: Duration::from_millis(150),
             })
             .await;
     }

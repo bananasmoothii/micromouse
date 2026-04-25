@@ -1,5 +1,5 @@
 use cortex_m::prelude::_embedded_hal_Pwm;
-use defmt::debug;
+use defmt::{debug, info};
 use embassy_stm32::gpio::Output;
 use embassy_stm32::peripherals::TIM2;
 use embassy_stm32::time::Hertz;
@@ -24,13 +24,11 @@ pub async fn buzzer_task(
         let task = BUZZER_CHANNEL.receive().await;
         pwm.set_frequency(task.freq);
         pwm.set_duty(pwm_channel, pwm.max_duty_cycle() / 2);
-        debug!("Enabling buzzer at {}", task.freq);
         pwm.enable(pwm_channel);
         Timer::after(task.duration).await;
-        debug!("Disabling buzzer");
         pwm.disable(pwm_channel);
 
-        // Timer::after(Duration::from_millis(100)).await;
+        Timer::after(Duration::from_millis(20)).await;
 
     }
 }
