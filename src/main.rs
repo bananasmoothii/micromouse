@@ -39,7 +39,7 @@ use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
-use crate::utils::DurationUtils;
+use crate::utils::{DurationUtils, HertzUtils};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -84,7 +84,7 @@ async fn main(mut spawner: Spawner) {
                 None,
                 None,
                 Some(buzzer_channel),
-                Hertz::hz(1000),
+                1000.hz(),
                 CountingMode::EdgeAlignedUp,
             ),
             Ch4,

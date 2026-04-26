@@ -55,7 +55,7 @@ impl DurationUtils for u64 {
     }
 }
 
-trait HertzUtils {
+pub trait HertzUtils {
     fn hz(self) -> Hertz;
     fn khz(self) -> Hertz;
     fn mhz(self) -> Hertz;

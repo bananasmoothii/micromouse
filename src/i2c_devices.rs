@@ -13,7 +13,7 @@ use embassy_stm32::peripherals::{DMA1_CH0, DMA1_CH6, I2C1, PB8, PB9};
 use embassy_stm32::time::Hertz;
 use embassy_time::{Duration, Timer};
 use embedded_hal_bus::i2c::RefCellDevice;
-use crate::utils::DurationUtils;
+use crate::utils::{DurationUtils, HertzUtils};
 
 pub async fn init_i2c_devices(
     spawner: &mut Spawner,
@@ -28,7 +28,7 @@ pub async fn init_i2c_devices(
 ) {
     let mut i2c_config = Config::default();
     // Use 100kHz for more reliable communication
-    i2c_config.frequency = Hertz::khz(200);
+    i2c_config.frequency = 200.khz();
     i2c_config.gpio_speed = Speed::High;
     i2c_config.timeout = Duration::from_millis(50);
 

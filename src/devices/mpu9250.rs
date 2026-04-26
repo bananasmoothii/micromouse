@@ -15,7 +15,7 @@ use mpu9250::{
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use core::cell::Cell;
-use crate::utils::DurationUtils;
+use crate::utils::{DurationUtils, HertzUtils};
 
 pub static LATEST_MPU: Mutex<CriticalSectionRawMutex, Cell<Option<MargMeasurements<[f32; 3]>>>> = Mutex::new(Cell::new(None));
 
@@ -36,7 +36,7 @@ impl Mpu9250Sensor {
             Mpu9250::marg_with_reinit(com, ncs, &mut Delay, &mut MpuConfig::marg(), |mut spi, ncs| {
                 let mut new_spi_config = spi::Config::default();
                 // even though the MPU9250 supports up to 20MHz, the max kernel clock for this pin on STM32F446RE is 16MHz.
-                new_spi_config.frequency = Hertz::mhz(4);
+                new_spi_config.frequency = 16.mhz();
                 spi.set_config(&new_spi_config).ok().map(|_| (spi, ncs))
             })?;
         // interrupts don't seem to work
