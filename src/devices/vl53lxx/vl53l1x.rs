@@ -70,11 +70,7 @@ impl VL53L1XSensor {
 
     /// Attempt to recover from a sensor error by stopping and restarting measurements
     async fn recover_sensor(&mut self) -> Result<(), Error<i2c::Error>> {
-        warn!(
-            "Hardware recovery for VL53L1X {:#x} ({:#x})",
-            self.address,
-            self.device.address()
-        );
+        warn!("Hardware recovery for VL53L1X {:#x}", self.address);
 
         // XSHUT high — sensor boots at default address 0x29
         self.xshut_pin.set_high();
@@ -84,6 +80,35 @@ impl VL53L1XSensor {
 
         info!("Recovery complete for {:#x}", self.address);
         Ok(())
+    }
+
+    /// Saves I2C timing config, applies SWRST to force-clear BSY, then restores config.
+    /// Must be called AFTER all XSHUT pins are LOW (sensors release SDA before SWRST).
+    fn i2c_swrst_recovery() {
+        use embassy_stm32::pac;
+
+        // Save timing registers — SWRST resets them to 0
+        let cr2_freq = pac::I2C1.cr2().read().freq();
+        let ccr_r = pac::I2C1.ccr().read();
+        let ccr_fs = ccr_r.f_s();
+        let ccr_duty = ccr_r.duty();
+        let ccr_val = ccr_r.ccr();
+        let trise_val = pac::I2C1.trise().read().trise();
+
+        // SWRST forces BSY=0 and releases SCL/SDA from the peripheral side
+        pac::I2C1.cr1().modify(|w| w.set_swrst(true));
+        cortex_m::asm::delay(900_000); // ~5 ms at 180 MHz — bus settles
+        pac::I2C1.cr1().modify(|w| w.set_swrst(false));
+
+        // CCR and TRISE require PE=0 to write; SWRST leaves PE=0
+        pac::I2C1.cr2().modify(|w| w.set_freq(cr2_freq));
+        pac::I2C1.ccr().write(|w| {
+            w.set_f_s(ccr_fs);
+            w.set_duty(ccr_duty);
+            w.set_ccr(ccr_val);
+        });
+        pac::I2C1.trise().write(|w| w.set_trise(trise_val));
+        pac::I2C1.cr1().modify(|w| w.set_pe(true));
     }
 
     fn reinit_no_xshut(&mut self, new_device: bool) -> Result<(), Error<i2c::Error>> {
@@ -211,52 +236,33 @@ pub async fn distance_sensor_task(
                     sensor.device.address(),
                     e
                 );
-                sensor_45d_left.xshut_pin.set_low();
-                sensor_middle.xshut_pin.set_low();
+                // Hold all sensors in reset so they release SDA before SWRST
                 sensor_45d_right.xshut_pin.set_low();
+                sensor_middle.xshut_pin.set_low();
+                sensor_45d_left.xshut_pin.set_low();
 
-                // SWRST the I2C peripheral to clear the BSY stuck state
-                use embassy_stm32::pac;
-                pac::I2C1.cr1().modify(|w| w.set_swrst(true));
-                pac::I2C1.cr1().modify(|w| w.set_swrst(false));
-                pac::I2C1.cr1().modify(|w| w.set_pe(true));
+                // SWRST: saves CCR/TRISE/CR2, clears BSY, restores config, re-enables PE
+                VL53L1XSensor::i2c_swrst_recovery();
 
+                // Wait for sensors to complete their internal reset
                 10.ms_timer().await;
 
-                info!("Recovering sensor 1");
-                sensor_45d_right.xshut_pin.set_high();
-                10.ms_timer().await;
                 if let Err(e2) = sensor_45d_right.recover_sensor().await {
-                    warn!(
-                        "Recovery failed for {:#x}: {:?}",
-                        sensor_45d_right.address, e2
-                    );
+                    warn!("Recovery failed for {:#x}: {:?}", sensor_45d_right.address, e2);
                     500.ms_timer().await;
                     continue;
                 }
-
-                info!("Recovering sensor 2");
-                sensor_middle.xshut_pin.set_high();
-                10.ms_timer().await;
                 if let Err(e2) = sensor_middle.recover_sensor().await {
                     warn!("Recovery failed for {:#x}: {:?}", sensor_middle.address, e2);
                     500.ms_timer().await;
                     continue;
                 }
-
-                info!("Recovering sensor 3");
-                sensor_45d_left.xshut_pin.set_high();
-                10.ms_timer().await;
                 if let Err(e2) = sensor_45d_left.recover_sensor().await {
-                    warn!(
-                        "Recovery failed for {:#x}: {:?}",
-                        sensor_45d_left.address, e2
-                    );
+                    warn!("Recovery failed for {:#x}: {:?}", sensor_45d_left.address, e2);
                     500.ms_timer().await;
                     continue;
                 }
-
-                info!("RECOVERY COMPLETE HURRAY");
+                info!("All sensors recovered");
             }
         }
 

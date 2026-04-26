@@ -119,56 +119,56 @@ async fn main(mut spawner: Spawner) {
     // Start Positioning task
     // spawner.spawn(positioning_task()).unwrap();
 
-    /*
-        info!("Configuring SPI...");
-        let mut spi_config = spi::Config::default();
-        // MPU9250 library requires Mode 3 (CPOL=1, CPHA=1)
-        // This matches mpu9250::MODE constant: IdleHigh, CaptureOnSecondTransition
-        spi_config.mode = spi::Mode {
-            polarity: spi::Polarity::IdleHigh,
-            phase: spi::Phase::CaptureOnSecondTransition,
-        };
 
-        info!("Creating SPI with MISO pull-down...");
-        let spi = Spi::new(
-            p.SPI1,     //
-            p.PB3,      // SCK
-            p.PA7,      // MOSI / SDA
-            p.PA6,      // MISO
-            p.DMA2_CH3, //
-            p.DMA2_CH2, //
-            spi_config,
-        );
+    /*        info!("Configuring SPI...");
+            let mut spi_config = spi::Config::default();
+            // MPU9250 library requires Mode 3 (CPOL=1, CPHA=1)
+            // This matches mpu9250::MODE constant: IdleHigh, CaptureOnSecondTransition
+            spi_config.mode = spi::Mode {
+                polarity: spi::Polarity::IdleHigh,
+                phase: spi::Phase::CaptureOnSecondTransition,
+            };
 
-        info!("Setting up chip select (CS)...");
-        let mut chip_select = Output::new(p.PC12, Level::High, Speed::Low);
-        // let interrupt = ExtiInput::new(p.PA2, p.EXTI2, Pull::None, Irqs);
+            info!("Creating SPI with MISO pull-down...");
+            let spi = Spi::new(
+                p.SPI1,     //
+                p.PB3,      // SCK
+                p.PA7,      // MOSI / SDA
+                p.PA6,      // MISO
+                p.DMA2_CH3, //
+                p.DMA2_CH2, //
+                spi_config,
+            );
 
-        // MPU9250 requires CS to be high during power-on to enable SPI mode
-        // Pulse CS to ensure the chip recognizes SPI mode
-        info!("Pulsing CS to enable SPI mode...");
-        chip_select.set_low();
-        10.ms_timer().await;
-        chip_select.set_high();
-        10.ms_timer().await;
+            info!("Setting up chip select (CS)...");
+            let mut chip_select = Output::new(p.PC12, Level::High, Speed::Low);
+            // let interrupt = ExtiInput::new(p.PA2, p.EXTI2, Pull::None, Irqs);
 
-        info!("Initializing MPU9250 IMU...");
+            // MPU9250 requires CS to be high during power-on to enable SPI mode
+            // Pulse CS to ensure the chip recognizes SPI mode
+            info!("Pulsing CS to enable SPI mode...");
+            chip_select.set_low();
+            10.ms_timer().await;
+            chip_select.set_high();
+            10.ms_timer().await;
 
-        let imu = match Mpu9250Sensor::init_new(spi, chip_select) {
-            Ok(s) => {
-                info!("IMU initialized successfully");
-                Box::leak(Box::new(s))
-            }
-            Err(e) => {
-                error!("Failed to initialize IMU: {}", e);
-                core::panic!("Sensor initialization failed");
-            }
-        };
+            info!("Initializing MPU9250 IMU...");
 
-        imu.start_continuous_measurement(&mut spawner)
-            .await
-            .unwrap();
-    */
+            let imu = match Mpu9250Sensor::init_new(spi, chip_select) {
+                Ok(s) => {
+                    info!("IMU initialized successfully");
+                    Box::leak(Box::new(s))
+                }
+                Err(e) => {
+                    error!("Failed to initialize IMU: {}", e);
+                    core::panic!("Sensor initialization failed");
+                }
+            };
+
+            imu.start_continuous_measurement(&mut spawner)
+                .await
+                .unwrap();*/
+
     spawner
         .spawn(hall_sensor_continuous_measuring(
             ExtiInput::new(p.PC2, p.EXTI2, Pull::None, Irqs),
