@@ -74,23 +74,6 @@ async fn main(mut spawner: Spawner) {
 
     let p = embassy_stm32::init(Default::default());
 
-    let buzzer_channel = PwmPin::new(p.PB2, OutputType::PushPull);
-
-    spawner
-        .spawn(buzzer_task(
-            SimplePwm::new(
-                p.TIM2,
-                None,
-                None,
-                None,
-                Some(buzzer_channel),
-                1000.hz(),
-                CountingMode::EdgeAlignedUp,
-            ),
-            Ch4,
-        ))
-        .unwrap();
-
     spawner
         .spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0))
         .unwrap();
@@ -181,6 +164,24 @@ async fn main(mut spawner: Spawner) {
         .spawn(hall_sensor_continuous_measuring(
             ExtiInput::new(p.PC3, p.EXTI3, Pull::None, Irqs),
             WheelSide::Right,
+        ))
+        .unwrap();
+
+
+    let buzzer_channel = PwmPin::new(p.PB2, OutputType::PushPull);
+
+    spawner
+        .spawn(buzzer_task(
+            SimplePwm::new(
+                p.TIM2,
+                None,
+                None,
+                None,
+                Some(buzzer_channel),
+                1000.hz(),
+                CountingMode::EdgeAlignedUp,
+            ),
+            Ch4,
         ))
         .unwrap();
 
