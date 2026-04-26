@@ -1,5 +1,5 @@
 use core::convert::Infallible;
-use defmt::info;
+use defmt::{info, trace};
 use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
@@ -60,6 +60,7 @@ impl Mpu9250Sensor {
         match self.device.all() {
             Ok(data) => {
                 self.last_data = data;
+                trace!("New MPU9250 data: accel={:?}, gyro={:?}, mag={:?}, temp={}", data.accel, data.gyro, data.mag, data.temp);
                 LATEST_MPU.lock(|cell| cell.set(Some(data)));
             },
             Err(e) => defmt::error!("Failed to read sensor data: {}", e),
