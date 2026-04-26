@@ -5,6 +5,7 @@ use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
+use crate::utils::DurationUtils;
 
 pub struct BuzzerTask {
     pub freq: Hertz,
@@ -39,6 +40,6 @@ pub async fn buzzer_task(
         Timer::after(task.duration).await;
         pwm.disable(pwm_channel);
 
-        Timer::after(Duration::from_millis(20)).await;
+        20.ms_timer().await;
     }
 }

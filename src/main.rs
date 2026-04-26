@@ -8,6 +8,7 @@ mod i2c_devices;
 mod labyrinth;
 pub mod positioning;
 mod trajectory;
+pub mod utils;
 
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, buzzer_task};
@@ -38,6 +39,7 @@ use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
 use panic_probe as _;
+use crate::utils::DurationUtils;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -146,9 +148,9 @@ async fn main(mut spawner: Spawner) {
         // Pulse CS to ensure the chip recognizes SPI mode
         info!("Pulsing CS to enable SPI mode...");
         chip_select.set_low();
-        Timer::after(Duration::from_millis(10)).await;
+        10.ms_timer().await;
         chip_select.set_high();
-        Timer::after(Duration::from_millis(10)).await;
+        10.ms_timer().await;
 
         info!("Initializing MPU9250 IMU...");
 
@@ -210,19 +212,19 @@ async fn motor_task(mut motor1: Motor<'static, TIM3>) {
     for i in 9..=100 {
         motor1.set_speed(i as f32 * 0.01);
         info!("speed: {}%", i);
-        Timer::after(Duration::from_millis(100)).await;
+        100.ms_timer().await;
     }
     info!("reached max speed");
 
     // if this function ends, pins are dropped and the motor halts
-    Timer::after(Duration::from_secs(5000)).await;
+    5000.s_timer().await;
 
     // motor1.set_speed(0.5);
     // loop {
     //     motor1.set_direction(MotorDirection::Forward);
-    //     Timer::after(Duration::from_secs(1)).await;
+    //     1.s_timer().await;
     //     motor1.set_direction(MotorDirection::Reverse);
-    //     Timer::after(Duration::from_secs(1)).await;
+    //     1.s_timer().await;
     // }
 }
 

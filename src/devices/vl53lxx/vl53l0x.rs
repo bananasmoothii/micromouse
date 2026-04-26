@@ -12,6 +12,7 @@ use vl53l0x::RangeStatus::{PhaseFail, SignalFail};
 use vl53l0x::*;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use crate::utils::DurationUtils;
 
 pub static VL53L0X_CHANNEL: Channel<CriticalSectionRawMutex, MeasurementData, 4> = Channel::new();
 
@@ -55,11 +56,11 @@ impl VL53L0XSensor {
         // Toggle XSHUT pin to reset the device
         debug!("  Toggling XSHUT pin...");
         config.xshut_pin.set_low();
-        Timer::after(Duration::from_millis(10)).await;
+        10.ms_timer().await;
 
         // Wait for device boot
         config.xshut_pin.set_high();
-        Timer::after(Duration::from_millis(10)).await;
+        10.ms_timer().await;
         debug!("  XSHUT toggled");
 
         let mut device = VL53L0x::new(i2c)?;
@@ -123,7 +124,7 @@ async fn distance_sensor_task(self_: &'static mut VL53L0XSensor) -> ! {
                         // those nine clocks. If not, then use the HW reset or cycle power to clear the
                         // bus
                         self_.device.com.write(0, &[0]).unwrap();
-                        Timer::after(Duration::from_millis(100)).await;
+                        100.ms_timer().await;
                     }
                 }
             }

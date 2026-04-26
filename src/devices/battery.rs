@@ -3,6 +3,7 @@ use defmt::info;
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::{Peri, peripherals};
 use embassy_time::{Duration, Timer};
+use crate::utils::DurationUtils;
 
 // change types if needed, again this is because of embassy task not allowing generics
 #[embassy_executor::task]
@@ -42,6 +43,6 @@ pub async fn battery_monitoring_task(
             format!("{:.1}", battery_voltage2).as_str()
         );
 
-        Timer::after(Duration::from_secs(2)).await;
+        2.s_timer().await;
     }
 }

@@ -26,7 +26,7 @@ pub struct PathPoint {
 pub static PATH_CHANNEL: SyncChannel<CriticalSectionRawMutex, PathPoint, 32> = SyncChannel::new();
 
 use crate::positioning::odometry::{WHEEL_RADIUS, WHEEL_BASE, TICKS_PER_REVOLUTION};
-
+use crate::utils::DurationUtils;
 // NOTE regarding concurrency design:
 // By using `AtomicI32` for incremental odometry ticks we avoid dropped packets.
 // For the planned Path tracking, an MPMC Channel acts as a perfect trajectory FIFO buffer.
@@ -137,7 +137,7 @@ pub async fn motor_controller_task(
         }
 
         // Wait for next control interval
-        Timer::after(Duration::from_millis(20)).await;
+        20.ms_timer().await;
     }
 }
 
@@ -277,6 +277,6 @@ pub async fn overcurrent_protection_task(
 
         // trace!("current: {} A (raw: {})", current_amps, max_raw);
 
-        Timer::after(Duration::from_millis(20)).await;
+        20.ms_timer().await;
     }
 }

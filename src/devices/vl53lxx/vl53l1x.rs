@@ -1,14 +1,18 @@
 use crate::devices::vl53lxx::{Config, MeasurementData};
+use crate::utils::DurationUtils;
 use defmt::{Format, debug, info, trace, warn};
 use embassy_executor::{SpawnError, Spawner};
+use embassy_futures::select::{Either3, select3};
 use embassy_stm32::gpio::Output;
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
+use embassy_stm32::pac::interrupt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, TimeoutError, Timer};
 use embedded_hal_bus::i2c::RefCellDevice;
+use futures_util::future::select_all;
 use vl53l1::*;
 
 pub struct VL53L1XSensor {
@@ -46,9 +50,9 @@ impl VL53L1XSensor {
         // Toggle XSHUT pin to reset the device
         info!("  Toggling XSHUT pin...");
         config.xshut_pin.set_low();
-        Timer::after(Duration::from_millis(10)).await;
+        10.ms_timer().await;
         config.xshut_pin.set_high();
-        Timer::after(Duration::from_millis(10)).await;
+        10.ms_timer().await;
 
         let mut self_ = Self {
             device: Device::default(),
@@ -72,21 +76,10 @@ impl VL53L1XSensor {
             self.device.address()
         );
 
-        // 1. XSHUT low — sensor resets, releases SDA
-        self.xshut_pin.set_low();
-        Timer::after(Duration::from_millis(10)).await;
-
-        // 2. SWRST the I2C peripheral to clear the BSY stuck state
-        use embassy_stm32::pac;
-        pac::I2C1.cr1().modify(|w| w.set_swrst(true));
-        pac::I2C1.cr1().modify(|w| w.set_swrst(false));
-        pac::I2C1.cr1().modify(|w| w.set_pe(true));
-
-        // 3. XSHUT high — sensor boots at default address 0x29
+        // XSHUT high — sensor boots at default address 0x29
         self.xshut_pin.set_high();
-        Timer::after(Duration::from_millis(10)).await;
+        10.ms_timer().await;
 
-        // 4. Re-initialize
         self.reinit_no_xshut(true)?;
 
         info!("Recovery complete for {:#x}", self.address);
@@ -135,73 +128,140 @@ impl VL53L1XSensor {
         Ok(())
     }
 
-    pub async fn start_continuous_measurement(
-        &'static mut self,
-        spawner: &mut Spawner,
-    ) -> Result<(), SpawnError> {
-        spawner.spawn(distance_sensor_task(
-            self,
-            match self.address {
-                0x30 => &VL53L1X_45D_RIGHT_CHANNEL,
-                0x31 => &VL53L1X_MIDDLE_CHANNEL,
-                0x32 => &VL53L1X_45D_LEFT_CHANNEL,
-                _ => panic!("You forgot to change i2c addresses here..."),
-            },
-        ))
-    }
-
     pub fn get_latest_measurement(&self) -> &RangingMeasurementData {
         &self.last_data
     }
 }
 
-#[embassy_executor::task(pool_size = 3)]
-async fn distance_sensor_task(self_: &'static mut VL53L1XSensor, chanel: &'static Channel1) -> ! {
+#[embassy_executor::task(pool_size = 1)]
+pub async fn distance_sensor_task(
+    mut sensor_45d_right: VL53L1XSensor,
+    mut sensor_middle: VL53L1XSensor,
+    mut sensor_45d_left: VL53L1XSensor,
+) -> ! {
     debug!("Distance sensor task running");
     loop {
         // Wait for data-ready interrupt, or poll at the sensor period as fallback.
-        if embassy_time::with_timeout(
-            Duration::from_millis(80),
-            self_.gpio_interrupt.wait_for_falling_edge(),
+        let either3 = select3(
+            embassy_time::with_timeout(
+                Duration::from_millis(80),
+                sensor_45d_right.gpio_interrupt.wait_for_low(),
+            ),
+            embassy_time::with_timeout(
+                Duration::from_millis(80),
+                sensor_middle.gpio_interrupt.wait_for_low(),
+            ),
+            embassy_time::with_timeout(
+                Duration::from_millis(80),
+                sensor_45d_left.gpio_interrupt.wait_for_low(),
+            ),
         )
-            .await
-            .is_err()
-        {
-            warn!("GPIO timeout for VL53L1X {:#x}", self_.address);
+            .await;
+
+        let sensor: &mut VL53L1XSensor;
+        let channel: &Channel1;
+        let timeout: bool;
+        match either3 {
+            Either3::First(timeout_result) => {
+                sensor = &mut sensor_45d_right;
+                channel = &VL53L1X_45D_RIGHT_CHANNEL;
+                timeout = timeout_result.is_err();
+            }
+            Either3::Second(timeout_result) => {
+                sensor = &mut sensor_middle;
+                channel = &VL53L1X_MIDDLE_CHANNEL;
+                timeout = timeout_result.is_err();
+            }
+            Either3::Third(timeout_result) => {
+                sensor = &mut sensor_45d_left;
+                channel = &VL53L1X_45D_LEFT_CHANNEL;
+                timeout = timeout_result.is_err();
+            }
+        }
+
+        if timeout {
+            warn!("GPIO timeout for VL53L1X {:#x}", sensor.address);
         }
 
         // Get the ranging measurement data
-        match get_ranging_measurement_data(&mut self_.device, &mut self_.i2c) {
-            Err(e) => {
-                warn!(
-                    "Error getting ranging data for {:#x} ({:#x}) {:?}",
-                    self_.address,
-                    self_.device.address(),
-                    e
-                );
-                if let Err(e2) = self_.recover_sensor().await {
-                    warn!("Recovery failed for {:#x}: {:?}", self_.address, e2);
-                    Timer::after(Duration::from_millis(500)).await;
-                }
-            }
+        match get_ranging_measurement_data(&mut sensor.device, &mut sensor.i2c) {
             Ok(data) => {
                 let wrapped_data = RangingMeasurementData(data);
-                self_.last_data = wrapped_data.clone();
+                sensor.last_data = wrapped_data.clone();
                 trace!(
-                    "VL53L1X {:#x} read: {}",
-                    self_.device.address(),
-                    wrapped_data
+                    "VL53L1X {:#x} read: {} mm, σ={} mm, {}",
+                    sensor.device.address(),
+                    wrapped_data.get_distance_mm(),
+                    wrapped_data.get_sigma_mm(),
+                    wrapped_data.get_status(),
                 );
-                let _ = chanel.try_send(wrapped_data);
-                if let Err(e) = vl53l1::clear_interrupt(&mut self_.device, &mut self_.i2c) {
+                let _ = channel.try_send(wrapped_data);
+                if let Err(e) = vl53l1::clear_interrupt(&mut sensor.device, &mut sensor.i2c) {
                     warn!(
                         "Error clearing interrupt for {:#x}: {:?}",
-                        self_.device.address(),
+                        sensor.device.address(),
                         e
                     );
                 }
             }
+            Err(e) => {
+                warn!(
+                    "Error getting ranging data for {:#x} ({:#x}) {:?}",
+                    sensor.address,
+                    sensor.device.address(),
+                    e
+                );
+                sensor_45d_left.xshut_pin.set_low();
+                sensor_middle.xshut_pin.set_low();
+                sensor_45d_right.xshut_pin.set_low();
+
+                // SWRST the I2C peripheral to clear the BSY stuck state
+                use embassy_stm32::pac;
+                pac::I2C1.cr1().modify(|w| w.set_swrst(true));
+                pac::I2C1.cr1().modify(|w| w.set_swrst(false));
+                pac::I2C1.cr1().modify(|w| w.set_pe(true));
+
+                10.ms_timer().await;
+
+                info!("Recovering sensor 1");
+                sensor_45d_right.xshut_pin.set_high();
+                10.ms_timer().await;
+                if let Err(e2) = sensor_45d_right.recover_sensor().await {
+                    warn!(
+                        "Recovery failed for {:#x}: {:?}",
+                        sensor_45d_right.address, e2
+                    );
+                    500.ms_timer().await;
+                    continue;
+                }
+
+                info!("Recovering sensor 2");
+                sensor_middle.xshut_pin.set_high();
+                10.ms_timer().await;
+                if let Err(e2) = sensor_middle.recover_sensor().await {
+                    warn!("Recovery failed for {:#x}: {:?}", sensor_middle.address, e2);
+                    500.ms_timer().await;
+                    continue;
+                }
+
+                info!("Recovering sensor 3");
+                sensor_45d_left.xshut_pin.set_high();
+                10.ms_timer().await;
+                if let Err(e2) = sensor_45d_left.recover_sensor().await {
+                    warn!(
+                        "Recovery failed for {:#x}: {:?}",
+                        sensor_45d_left.address, e2
+                    );
+                    500.ms_timer().await;
+                    continue;
+                }
+
+                info!("RECOVERY COMPLETE HURRAY");
+            }
         }
+
+        // try to make i2c not crash
+        // 5.ms_timer().await;
     }
 }
 

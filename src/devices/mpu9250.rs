@@ -15,6 +15,7 @@ use mpu9250::{
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use core::cell::Cell;
+use crate::utils::DurationUtils;
 
 pub static LATEST_MPU: Mutex<CriticalSectionRawMutex, Cell<Option<MargMeasurements<[f32; 3]>>>> = Mutex::new(Cell::new(None));
 
@@ -81,7 +82,7 @@ impl Mpu9250Sensor {
 async fn data_fetch_task(self_: &'static mut Mpu9250Sensor) -> ! {
     loop {
         // data seems to always be ready and fresh, but always reading would block the CPU on this task
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(20)).await;
+        20.ms_timer().await;
         self_.on_data_ready()
     }
 }

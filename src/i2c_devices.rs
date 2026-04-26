@@ -1,4 +1,4 @@
-use crate::devices::vl53lxx::vl53l1x::VL53L1XSensor;
+use crate::devices::vl53lxx::vl53l1x::{VL53L1XSensor, distance_sensor_task};
 use crate::{Irqs, devices};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -13,8 +13,9 @@ use embassy_stm32::peripherals::{DMA1_CH0, DMA1_CH6, I2C1, PB8, PB9};
 use embassy_stm32::time::Hertz;
 use embassy_time::{Duration, Timer};
 use embedded_hal_bus::i2c::RefCellDevice;
+use crate::utils::DurationUtils;
 
-pub async fn init_i2c_devices<const N: usize>(
+pub async fn init_i2c_devices(
     spawner: &mut Spawner,
     i2c_peri: Peri<'static, I2C1>,
     scl: Peri<'static, PB8>,
@@ -22,8 +23,8 @@ pub async fn init_i2c_devices<const N: usize>(
     tx_dma: Peri<'static, DMA1_CH6>,
     rx_dma: Peri<'static, DMA1_CH0>,
     irqs: Irqs,
-    mut xshuts: [Output<'static>; N],
-    interrupts: [ExtiInput<'static>; N],
+    mut xshuts: [Output<'static>; 3],
+    interrupts: [ExtiInput<'static>; 3],
 ) {
     let mut i2c_config = Config::default();
     // Use 200kHz for reliable communication
@@ -36,7 +37,7 @@ pub async fn init_i2c_devices<const N: usize>(
     for xshut in &mut xshuts {
         xshut.set_low();
     }
-    Timer::after(Duration::from_millis(50)).await;
+    50.ms_timer().await;
 
     let i2c = I2c::new(i2c_peri, scl, sda, irqs, tx_dma, rx_dma, i2c_config);
 
@@ -45,8 +46,11 @@ pub async fn init_i2c_devices<const N: usize>(
 
     // 2. Sequential Initialization
     info!("Initializing distance sensors...");
-    let mut initialized_sensors = Vec::with_capacity(N);
     let base_address = 0x30;
+
+    let mut sensor1: Option<VL53L1XSensor> = None;
+    let mut sensor2: Option<VL53L1XSensor> = None;
+    let mut sensor3: Option<VL53L1XSensor> = None;
 
     for (i, (xshut, interrupt)) in xshuts.into_iter().zip(interrupts.into_iter()).enumerate() {
         let new_address = base_address + (i as u8);
@@ -61,24 +65,29 @@ pub async fn init_i2c_devices<const N: usize>(
             },
             i2c_dev,
             new_address,
-        ).await {
+        )
+            .await
+        {
             Ok(s) => {
                 info!("Distance sensor {} initialized at 0x{:02x}", i, new_address);
-                initialized_sensors.push(Box::leak(Box::new(s)));
+                match i {
+                    0 => sensor1 = Some(s),
+                    1 => sensor2 = Some(s),
+                    2 => sensor3 = Some(s),
+                    _ => panic!("Too many sensors"),
+                }
             }
             Err(e) => {
                 error!("Failed to initialize distance sensor {}: {}", i, e);
                 core::panic!("Sensor initialization failed");
             }
         }
-        if i == 1 {
-            break;
-        }
     }
 
-    info!("Starting continuous measurement for {} sensors", N);
-
-    for sensor in initialized_sensors {
-        sensor.start_continuous_measurement(spawner).await.unwrap();
+    if let (Some(s1), Some(s2), Some(s3)) = (sensor1, sensor2, sensor3) {
+        info!("Starting continuous measurement for all VL53L1X sensors");
+        spawner.spawn(distance_sensor_task(s1, s2, s3)).unwrap();
+    } else {
+        error!("Could not start all VL53L1X sensors, starting none.");
     }
 }

@@ -12,6 +12,7 @@ use core::sync::atomic::Ordering;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use crate::positioning::types::Position2D;
+use crate::utils::DurationUtils;
 
 pub static CURRENT_STATE: Mutex<CriticalSectionRawMutex, Cell<Position2D>> = Mutex::new(Cell::new(Position2D {
     x: 0.0,
@@ -61,6 +62,6 @@ pub async fn positioning_task() {
         CURRENT_STATE.lock(|cell| cell.set(state));
 
         // Processing loop rate
-        embassy_time::Timer::after_millis(20).await;
+        20.ms_timer().await;
     }
 }
