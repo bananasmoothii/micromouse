@@ -14,7 +14,8 @@ pub struct Config {
 pub struct TimingConfig {
     /// Measurement timing budget in microseconds (for example: 66000 for 15Hz)
     pub timing_budget_us: u32,
-    /// Inter-measurement period in milliseconds (minimum: 69ms from testing for VL53L1X)
+    /// Inter-measurement period in milliseconds (must be >= timing_budget_ms + 4, where 4 is
+    /// `TIMED_MODE_TIMING_GUARD_MILLISECONDS` in `vl53l1/lib/vl53l1/src/lib.rs::start_measurement`)
     pub inter_measurement_period_ms: u32,
 }
 
@@ -22,7 +23,7 @@ impl Default for TimingConfig {
     fn default() -> Self {
         Self {
             timing_budget_us: 66_000,
-            inter_measurement_period_ms: 69,
+            inter_measurement_period_ms: 70,
         }
     }
 }

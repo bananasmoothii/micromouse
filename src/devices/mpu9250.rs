@@ -35,7 +35,7 @@ impl Mpu9250Sensor {
             Mpu9250::marg_with_reinit(com, ncs, &mut Delay, &mut MpuConfig::marg(), |mut spi, ncs| {
                 let mut new_spi_config = spi::Config::default();
                 // even though the MPU9250 supports up to 20MHz, the max kernel clock for this pin on STM32F446RE is 16MHz.
-                new_spi_config.frequency = Hertz::mhz(16);
+                new_spi_config.frequency = Hertz::mhz(4);
                 spi.set_config(&new_spi_config).ok().map(|_| (spi, ncs))
             })?;
         // interrupts don't seem to work

@@ -15,8 +15,10 @@ use crate::devices::hall_sensor_3144::{WheelSide, hall_sensor_continuous_measuri
 use crate::devices::motors::Motor;
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
+use crate::i2c_devices::init_i2c_devices;
 use crate::positioning::positioning_task;
 use alloc::boxed::Box;
+use alloc::vec;
 use alloc::vec::Vec;
 use defmt::*;
 use defmt_rtt as _;
@@ -87,45 +89,35 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-    for freq in [523, 659, 784, 1047] {
-        BUZZER_CHANNEL
-            .send(BuzzerTask {
-                freq: Hertz::hz(freq),
-                duration: Duration::from_millis(150),
-            })
-            .await;
-    }
-
     spawner
         .spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0))
         .unwrap();
+
+    init_i2c_devices(
+        &mut spawner,
+        p.I2C1,
+        p.PB8,
+        p.PB9,
+        p.DMA1_CH6,
+        p.DMA1_CH0,
+        Irqs,
+        [
+            Output::new(p.PB13, Level::Low, Speed::Low),
+            Output::new(p.PB14, Level::Low, Speed::Low),
+            Output::new(p.PB15, Level::Low, Speed::Low),
+        ],
+        [
+            ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
+            ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
+            ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
+        ],
+    )
+        .await;
+
+    // Start Positioning task
+    // spawner.spawn(positioning_task()).unwrap();
+
     /*
-        // Start Positioning task
-        spawner.spawn(positioning_task()).unwrap();
-
-        /*
-        init_i2c_devices(
-            &mut spawner,
-            p.I2C1,
-            p.PB8,
-            p.PB9,
-            p.DMA1_CH6,
-            p.DMA1_CH0,
-            Irqs,
-            vec![
-                Output::new(p.PB13, Level::Low, Speed::Low),
-                Output::new(p.PB14, Level::Low, Speed::Low),
-                Output::new(p.PB15, Level::Low, Speed::Low),
-            ],
-            vec![
-                ExtiInput::new(p.PC5, p.EXTI5, Pull::None, Irqs),
-                ExtiInput::new(p.PC6, p.EXTI6, Pull::None, Irqs),
-                ExtiInput::new(p.PC8, p.EXTI8, Pull::None, Irqs),
-            ],
-        )
-            .await;
-         */
-
         info!("Configuring SPI...");
         let mut spi_config = spi::Config::default();
         // MPU9250 library requires Mode 3 (CPOL=1, CPHA=1)
@@ -140,7 +132,7 @@ async fn main(mut spawner: Spawner) {
             p.SPI1,     //
             p.PB3,      // SCK
             p.PA7,      // MOSI / SDA
-            p.PA6,      // MISO (with internal pull-down to prevent floating)
+            p.PA6,      // MISO
             p.DMA2_CH3, //
             p.DMA2_CH2, //
             spi_config,
@@ -174,66 +166,64 @@ async fn main(mut spawner: Spawner) {
         imu.start_continuous_measurement(&mut spawner)
             .await
             .unwrap();
+    */
+    spawner
+        .spawn(hall_sensor_continuous_measuring(
+            ExtiInput::new(p.PC2, p.EXTI2, Pull::None, Irqs),
+            WheelSide::Left,
+        ))
+        .unwrap();
 
-        spawner
-            .spawn(hall_sensor_continuous_measuring(
-                ExtiInput::new(p.PC2, p.EXTI2, Pull::None, Irqs),
-                WheelSide::Left,
-            ))
-            .unwrap();
+    spawner
+        .spawn(hall_sensor_continuous_measuring(
+            ExtiInput::new(p.PC3, p.EXTI3, Pull::None, Irqs),
+            WheelSide::Right,
+        ))
+        .unwrap();
 
-        spawner
-            .spawn(hall_sensor_continuous_measuring(
-                ExtiInput::new(p.PC3, p.EXTI3, Pull::None, Irqs),
-                WheelSide::Right,
-            ))
-            .unwrap();
+    let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
+    let led = Output::new(p.PA5, Level::Low, Speed::Medium);
 
-        let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
-        let led = Output::new(p.PA5, Level::Low, Speed::Medium);
+    button_task(user_button, led).await;
+}
 
-        button_task(user_button, led).await;
-    }
+async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
+    info!("Main task ready");
+    let mut toggle_led = || {
+        led.toggle();
+    };
 
-    async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
-        info!("Main task ready");
-        let mut toggle_led = || {
-            led.toggle();
-        };
+    let mut button_actions: Vec<&mut dyn FnMut()> = Vec::new();
+    button_actions.push(&mut toggle_led);
 
-        let mut button_actions: Vec<&mut dyn FnMut()> = Vec::new();
-        button_actions.push(&mut toggle_led);
-
-        loop {
-            button.wait_for_any_edge().await;
-            for action in button_actions.iter_mut() {
-                action()
-            }
+    loop {
+        button.wait_for_any_edge().await;
+        for action in button_actions.iter_mut() {
+            action()
         }
     }
+}
 
-    #[embassy_executor::task]
-    async fn motor_task(mut motor1: Motor<'static, TIM3>) {
-        // minimum speed percentage seems to be 9%
-        for i in 9..=100 {
-            motor1.set_speed(i as f32 * 0.01);
-            info!("speed: {}%", i);
-            Timer::after(Duration::from_millis(100)).await;
-        }
-        info!("reached max speed");
+#[embassy_executor::task]
+async fn motor_task(mut motor1: Motor<'static, TIM3>) {
+    // minimum speed percentage seems to be 9%
+    for i in 9..=100 {
+        motor1.set_speed(i as f32 * 0.01);
+        info!("speed: {}%", i);
+        Timer::after(Duration::from_millis(100)).await;
+    }
+    info!("reached max speed");
 
-        // if this function ends, pins are dropped and the motor halts
-        Timer::after(Duration::from_secs(5000)).await;
+    // if this function ends, pins are dropped and the motor halts
+    Timer::after(Duration::from_secs(5000)).await;
 
-        // motor1.set_speed(0.5);
-        // loop {
-        //     motor1.set_direction(MotorDirection::Forward);
-        //     Timer::after(Duration::from_secs(1)).await;
-        //     motor1.set_direction(MotorDirection::Reverse);
-        //     Timer::after(Duration::from_secs(1)).await;
-        // }
-
-     */
+    // motor1.set_speed(0.5);
+    // loop {
+    //     motor1.set_direction(MotorDirection::Forward);
+    //     Timer::after(Duration::from_secs(1)).await;
+    //     motor1.set_direction(MotorDirection::Reverse);
+    //     Timer::after(Duration::from_secs(1)).await;
+    // }
 }
 
 fn poc_trajectory_svg() {

@@ -1,6 +1,4 @@
 use cortex_m::prelude::_embedded_hal_Pwm;
-use defmt::{debug, info};
-use embassy_stm32::gpio::Output;
 use embassy_stm32::peripherals::TIM2;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
@@ -15,11 +13,24 @@ pub struct BuzzerTask {
 
 pub static BUZZER_CHANNEL: Channel<CriticalSectionRawMutex, BuzzerTask, 16> = Channel::new();
 
+const STARTING_BIP: bool = false;
+
 #[embassy_executor::task]
 pub async fn buzzer_task(
     mut pwm: SimplePwm<'static, TIM2>,
     pwm_channel: embassy_stm32::timer::Channel,
 ) {
+    if STARTING_BIP {
+        for freq in [523, 659, 784, 1047] {
+            BUZZER_CHANNEL
+                .send(BuzzerTask {
+                    freq: Hertz::hz(freq),
+                    duration: Duration::from_millis(150),
+                })
+                .await;
+        }
+    }
+
     loop {
         let task = BUZZER_CHANNEL.receive().await;
         pwm.set_frequency(task.freq);
@@ -29,6 +40,5 @@ pub async fn buzzer_task(
         pwm.disable(pwm_channel);
 
         Timer::after(Duration::from_millis(20)).await;
-
     }
 }
