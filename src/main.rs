@@ -19,6 +19,7 @@ use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
 use crate::i2c_devices::init_i2c_devices;
 use crate::positioning::positioning_task;
 use crate::utils::{DurationUtils, HertzUtils};
+use crate::positioning::positioning_task;
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -78,6 +79,48 @@ async fn main(mut spawner: Spawner) {
         .spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0))
         .unwrap();
 
+    let pwm1_pin = PwmPin::new(p.PB4, OutputType::PushPull);
+    let pwm1 = SimplePwm::new(
+        p.TIM3,
+        Some(pwm1_pin),
+        None,
+        None,
+        None,
+        Hertz::khz(15),
+        CountingMode::EdgeAlignedUp,
+    );
+
+    let pwm2_pin = PwmPin::new(p.PB10, OutputType::PushPull);
+    let pwm2 = SimplePwm::new(
+        p.TIM2,
+        None,
+        None,
+        Some(pwm2_pin),
+        None,
+        Hertz::khz(15),
+        CountingMode::EdgeAlignedUp,
+    );
+
+    let mut motor1 = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1);
+    let mut motor2 = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3);
+    // motor1.set_speed(0.25);
+    // motor2.set_speed(0.25);
+    // info!("speed set");
+    // spawner.spawn(motor_task(motor1)).unwrap();
+
+    // Start overcurrent protection
+    spawner.spawn(devices::motors::overcurrent_protection_task(
+        Adc::new(p.ADC2),
+        p.PA0,
+        p.PA1,
+    )).unwrap();
+
+    /*
+
+    // Start Positioning task
+    spawner.spawn(positioning_task()).unwrap();
+
+    /*
     init_i2c_devices(
         &mut spawner,
         p.I2C1,
@@ -184,6 +227,8 @@ async fn main(mut spawner: Spawner) {
             Ch4,
         ))
         .unwrap();
+
+     */
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);

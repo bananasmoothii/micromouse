@@ -14,6 +14,16 @@ use embassy_time::{Duration, TimeoutError, Timer};
 use embedded_hal_bus::i2c::RefCellDevice;
 use futures_util::future::select_all;
 use vl53l1::*;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+use embassy_time::{Delay, Duration, Timer};
+use embedded_hal::i2c::I2c as _;
+use embedded_hal_bus::i2c::RefCellDevice;
+use vl53l1::RangeStatus::SIGNAL_FAIL;
+use vl53l1::*;
+
+pub static VL53L1X_CHANNEL: Channel<CriticalSectionRawMutex, RangingMeasurementData, 4> =
+    Channel::new();
 
 pub struct VL53L1XSensor {
     device: Device,

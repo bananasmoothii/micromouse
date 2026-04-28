@@ -5,6 +5,8 @@ use embassy_executor::{SpawnError, Spawner};
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use embedded_hal::i2c::I2c as _;
 use embedded_hal_bus::i2c::RefCellDevice;

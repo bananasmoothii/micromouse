@@ -81,10 +81,6 @@ impl OdometryProcessor {
             dy = radius * (1.0 - d_theta_cos);
         }
 
-        MovementDelta {
-            dx,
-            dy,
-            d_theta,
-        }
+        MovementDelta { dx, dy, d_theta }
     }
 }

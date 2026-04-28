@@ -5,14 +5,14 @@ pub mod types;
 
 use core::cell::Cell;
 use self::types::MovementDelta;
-use defmt::info;
-use crate::devices::mpu9250::LATEST_MPU;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
+use crate::devices::mpu9250::LATEST_MPU;
 use core::sync::atomic::Ordering;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use crate::positioning::types::Position2D;
 use crate::utils::DurationUtils;
+use defmt::info;
 
 pub static CURRENT_STATE: Mutex<CriticalSectionRawMutex, Cell<Position2D>> = Mutex::new(Cell::new(Position2D {
     x: 0.0,
@@ -34,7 +34,11 @@ pub async fn positioning_task() {
     loop {
         // Collect data from sensors
         let mut mpu_result = mpu::MpuResult {
-            delta: MovementDelta { dx: 0.0, dy: 0.0, d_theta: 0.0 },
+            delta: MovementDelta {
+                dx: 0.0,
+                dy: 0.0,
+                d_theta: 0.0,
+            },
             relative_mag: 0.0,
             dt: 0.02,
             accel_x: 0.0,

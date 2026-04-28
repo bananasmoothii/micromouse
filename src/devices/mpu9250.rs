@@ -1,3 +1,4 @@
+use core::cell::Cell;
 use core::convert::Infallible;
 use defmt::{info, trace};
 use embassy_executor::{SpawnError, Spawner};
@@ -7,17 +8,15 @@ use embassy_stm32::spi;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::spi::mode::Master;
 use embassy_stm32::time::Hertz;
-use embassy_time::Delay;
-use mpu9250::{
-    Error, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice,
-    SpiError,
-};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_time::Delay;
+use mpu9250::{Error, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice, SpiError};
 use core::cell::Cell;
 use crate::utils::{DurationUtils, HertzUtils};
 
-pub static LATEST_MPU: Mutex<CriticalSectionRawMutex, Cell<Option<MargMeasurements<[f32; 3]>>>> = Mutex::new(Cell::new(None));
+pub static LATEST_MPU: Mutex<CriticalSectionRawMutex, Cell<Option<MargMeasurements<[f32; 3]>>>> =
+    Mutex::new(Cell::new(None));
 
 pub struct Mpu9250Sensor {
     device: Mpu9250<SpiDevice<Spi<'static, Async, Master>, Output<'static>>, Marg>,
@@ -32,13 +31,18 @@ impl Mpu9250Sensor {
         // gpio_interrupt: ExtiInput<'static>,
     ) -> Result<Self, Error<SpiError<spi::Error, Infallible>>> {
         info!("Initializing MPU9250 via SPI...");
-        let device =
-            Mpu9250::marg_with_reinit(com, ncs, &mut Delay, &mut MpuConfig::marg(), |mut spi, ncs| {
+        let mut device = Mpu9250::marg_with_reinit(
+            com,
+            ncs,
+            &mut Delay,
+            &mut MpuConfig::marg(),
+            |mut spi, ncs| {
                 let mut new_spi_config = spi::Config::default();
                 // even though the MPU9250 supports up to 20MHz, the max kernel clock for this pin on STM32F446RE is 16MHz.
                 new_spi_config.frequency = 16.mhz();
                 spi.set_config(&new_spi_config).ok().map(|_| (spi, ncs))
-            })?;
+            },
+        )?;
         // interrupts don't seem to work
         // device.interrupt_config(InterruptConfig::INT_ANYRD_CLEAR)?;
         // device.enable_interrupts(InterruptEnable::WOM_EN)?;
@@ -62,7 +66,7 @@ impl Mpu9250Sensor {
                 self.last_data = data;
                 trace!("New MPU9250 data: accel={:?}, gyro={:?}, mag={:?}, temp={}", data.accel, data.gyro, data.mag, data.temp);
                 LATEST_MPU.lock(|cell| cell.set(Some(data)));
-            },
+            }
             Err(e) => defmt::error!("Failed to read sensor data: {}", e),
         }
     }
