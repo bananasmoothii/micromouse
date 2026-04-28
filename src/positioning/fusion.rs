@@ -1,18 +1,9 @@
-use crate::devices::hall_sensor_3144::{
-    LEFT_FORWARD, LEFT_LAST_TICK_US, LEFT_TICK_INTERVAL_US,
-    RIGHT_FORWARD, RIGHT_LAST_TICK_US, RIGHT_TICK_INTERVAL_US,
-};
 use crate::positioning::mpu::MpuResult;
-use crate::positioning::odometry::DISTANCE_PER_TICK;
+use crate::positioning::odometry::{left_wheel_velocity, right_wheel_velocity};
 use crate::positioning::types::{MovementDelta, Position2D};
 use core::f32::consts::PI;
-use core::sync::atomic::Ordering;
 use embassy_time::Instant;
 use micromath::F32Ext;
-
-/// Robot considered stopped if no tick arrives within this window.
-/// At minimum speed (~0.1 m/s), tick period is ~630 ms, so 700 ms is a safe threshold.
-const MAX_TICK_GAP_US: u32 = 700_000;
 
 pub struct SensorFusion {
     state: Position2D,
@@ -57,32 +48,12 @@ impl SensorFusion {
             odom_global_y: 0.0,
             p_theta: 1.0,
             q_theta: 0.001,
-            r_theta_odom: 0.05,
-            r_theta_mag: 10.0, // High noise -> weak but steady long-term correction
+            r_theta_odom: 1.0,  // High value → gyro dominates; odometry barely corrects solo-tick noise
+            r_theta_mag: 5.0,   // Slightly more mag trust to compensate for reduced odom correction
             p_xy: 1.0,
             q_xy: 0.005,
             r_xy_odom: 0.02,
         }
-    }
-
-    /// Compute signed wheel velocity from inter-tick timing.
-    ///
-    /// Uses `max(elapsed_since_last_tick, last_tick_interval)` as the effective period:
-    /// - Constant speed: elapsed ≈ interval → stable velocity.
-    /// - Decelerating: elapsed > interval → period grows → velocity decreases smoothly.
-    /// - Stopped: elapsed hits MAX_TICK_GAP_US → returns 0.
-    /// - Not yet two ticks: interval == 0 → returns 0.
-    fn wheel_velocity(last_us: u32, interval_us: u32, now_us: u32, forward: bool) -> f32 {
-        if interval_us == 0 {
-            return 0.0;
-        }
-        let elapsed_us = now_us.wrapping_sub(last_us);
-        if elapsed_us > MAX_TICK_GAP_US {
-            return 0.0;
-        }
-        let period_us = elapsed_us.max(interval_us);
-        let v = DISTANCE_PER_TICK / (period_us as f32 * 1e-6);
-        if forward { v } else { -v }
     }
 
     pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult) -> Position2D {
@@ -132,18 +103,8 @@ impl SensorFusion {
         //    This is inherently adaptive: faster → shorter period → responsive;
         //    slower → longer period → smooth.
         let now_us = Instant::now().as_micros() as u32;
-        let v_left = Self::wheel_velocity(
-            LEFT_LAST_TICK_US.load(Ordering::Relaxed),
-            LEFT_TICK_INTERVAL_US.load(Ordering::Relaxed),
-            now_us,
-            LEFT_FORWARD.load(Ordering::Relaxed),
-        );
-        let v_right = Self::wheel_velocity(
-            RIGHT_LAST_TICK_US.load(Ordering::Relaxed),
-            RIGHT_TICK_INTERVAL_US.load(Ordering::Relaxed),
-            now_us,
-            RIGHT_FORWARD.load(Ordering::Relaxed),
-        );
+        let v_left = left_wheel_velocity(now_us);
+        let v_right = right_wheel_velocity(now_us);
         let v_center = (v_left + v_right) / 2.0;
         self.state.v_x = v_center * cos_theta;
         self.state.v_y = v_center * sin_theta;

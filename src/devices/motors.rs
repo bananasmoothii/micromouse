@@ -1,5 +1,8 @@
-use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
-use crate::positioning::odometry::{TICKS_PER_REVOLUTION, WHEEL_BASE, WHEEL_RADIUS};
+use crate::devices::mpu9250::LATEST_MPU;
+use crate::positioning::odometry::{WHEEL_BASE, left_wheel_velocity, right_wheel_velocity};
+use crate::positioning::CURRENT_STATE;
+use core::cell::Cell;
+use micromath::F32Ext;
 use crate::utils::DurationUtils;
 use core::f32::consts::{PI, TAU};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -11,7 +14,7 @@ use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
 use embassy_stm32::{Peri, peripherals};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel as SyncChannel;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 
 pub const DT: f32 = 0.02; // 20ms control loop iteration length
 
@@ -36,13 +39,13 @@ pub static OVERCURRENT_FAULT: AtomicBool = AtomicBool::new(false);
 /// PI Controller Proportional Gain.
 /// Pushes current directly against the immediate speed error gap.
 /// If the robot gets pushed, or slowed down dynamically by a turn, Kp ramps PWM.
-pub const KP: f32 = 0.5;
+pub const KP: f32 = 0.20;
 
 /// PI Controller Integral Gain.
 /// Sums up persistent error over time to correct steady-state offsets.
 /// Extremely helpful for ensuring the micromouse achieves the commanded velocity eventually
 /// despite battery voltage sag preventing standard PWM ratios from reaching top speed.
-pub const KI: f32 = 0.1;
+pub const KI: f32 = 0.02;
 
 /// Feedforward gain: maps desired wheel linear velocity (m/s) to an estimated
 /// PWM command in the -1.0..1.0 range. Multiply a wheel velocity by this
@@ -69,23 +72,46 @@ fn angle(angle: f32) -> f32 {
     (angle + PI) % TAU - PI
 }
 
-/// Asynchronous task that consumes a trajectory over `PATH_CHANNEL`,
-/// derives continuous PI-controlled PWM to both differential wheels,
-/// and corrects physical deviations dynamically using Odometry atomic ticks.
+/// Output PWM smoothing: EMA weight on the freshly-computed raw PWM.
+/// Lower = slower but smoother; higher = more responsive but noisier.
+/// Equivalent time constant: tau = DT * (1 - EMA_ALPHA) / EMA_ALPHA.
+/// At 0.25: tau ≈ 60 ms.  At 0.40: tau ≈ 30 ms.
+const EMA_ALPHA: f32 = 0.30;
+
+/// Velocity measurement smoothing before PI.
+/// Prevents per-tick estimation jitter (2 ticks/rev → v oscillates as elapsed grows)
+/// from driving hard PI corrections.  Higher = faster response but noisier error signal.
+const V_EMA_ALPHA: f32 = 0.40;
+
+/// Position correction gains (added on top of trajectory velocity).
+/// Forward error (robot behind waypoint) → add forward speed.
+/// Lateral error → steer toward waypoint.
+/// Heading error → correct orientation.
+const KP_FWD: f32 = 0.6; // (m/s) per meter behind
+const KP_LAT: f32 = 0.8; // (rad/s) per meter lateral offset — reduced to limit noise from EKF jitter
+const KP_HDG: f32 = 0.6; // (rad/s) per radian heading error
+
+/// If the robot is more than this far behind its current waypoint, pause consuming
+/// new waypoints so the trajectory doesn't race ahead of reality.
+const MAX_LAG_M: f32 = 0.12;
+
+/// Gyro angular rate feedback gain. Scales the difference between commanded and
+/// actual yaw rate (rad/s) to an additive angular velocity correction (rad/s).
+/// Increase to react more aggressively to wheel imbalance; decrease if oscillatory.
+const K_ANG: f32 = 0.10;
+
 #[embassy_executor::task]
 pub async fn motor_controller_task(
     mut left_motor: Motor<'static, peripherals::TIM3>,
     mut right_motor: Motor<'static, peripherals::TIM2>,
 ) {
-    let distance_per_tick = 2.0 * PI * WHEEL_RADIUS / TICKS_PER_REVOLUTION;
-
-    let mut last_left_ticks = LEFT_TICKS_TOTAL.load(Ordering::Relaxed);
-    let mut last_right_ticks = RIGHT_TICKS_TOTAL.load(Ordering::Relaxed);
-
-    let mut left_integral = 0.0;
-    let mut right_integral = 0.0;
-
+    let mut left_integral = 0.0f32;
+    let mut right_integral = 0.0f32;
     let mut last_waypoint: Option<PathPoint> = None;
+    let mut prev_left_out = 0.0f32;
+    let mut prev_right_out = 0.0f32;
+    let mut smooth_left_v = 0.0f32;
+    let mut smooth_right_v = 0.0f32;
     let mut fault_logged = false;
 
     loop {
@@ -103,59 +129,111 @@ pub async fn motor_controller_task(
         let mut target_lin = 0.0f32;
         let mut target_ang = 0.0f32;
 
-        // Derive target velocity from consecutive waypoint spacing.
-        // The VelocityProfileOptimizer encodes the speed profile in the distance between
-        // waypoints (each one DT seconds of travel apart). Using actual-position→next-waypoint
-        // distance would inflate target_lin as the robot lags, causing runaway.
-        if let Ok(next_point) = PATH_CHANNEL.try_receive() {
-            if let Some(lp) = last_waypoint {
-                let dx = next_point.x - lp.x;
-                let dy = next_point.y - lp.y;
-                target_lin = micromath::F32Ext::sqrt(dx * dx + dy * dy) / DT;
-                target_ang = angle(next_point.theta - lp.theta) / DT;
+        // Read robot position once per loop for lag check and position correction.
+        let state = CURRENT_STATE.lock(Cell::get);
+        let (sin_t, cos_t) = state.theta.sin_cos();
+
+        // Only advance to the next waypoint if the robot is not too far behind the
+        // current one. This keeps the trajectory from racing ahead of reality.
+        let should_advance = match &last_waypoint {
+            None => true,
+            Some(wp) => {
+                let lag = (wp.x - state.x) * cos_t + (wp.y - state.y) * sin_t;
+                lag < MAX_LAG_M
             }
-            last_waypoint = Some(next_point);
-        } else {
-            last_waypoint = None;
-            left_integral = 0.0;
-            right_integral = 0.0;
+        };
+
+        if should_advance {
+            if let Ok(next_point) = PATH_CHANNEL.try_receive() {
+                if let Some(lp) = last_waypoint {
+                    let dx = next_point.x - lp.x;
+                    let dy = next_point.y - lp.y;
+                    target_lin = micromath::F32Ext::sqrt(dx * dx + dy * dy) / DT;
+                    target_ang = angle(next_point.theta - lp.theta) / DT;
+                }
+                last_waypoint = Some(next_point);
+            } else {
+                // Trajectory finished.
+                last_waypoint = None;
+                left_integral = 0.0;
+                right_integral = 0.0;
+                smooth_left_v = 0.0;
+                smooth_right_v = 0.0;
+            }
+        }
+        // When should_advance = false, target stays 0 and position correction below
+        // drives the robot toward its current waypoint at a controlled rate.
+
+        // Soft position correction toward the current waypoint.
+        // Adds to (not replaces) the trajectory velocity so corrections are bounded.
+        if let Some(wp) = &last_waypoint {
+            let err_x = wp.x - state.x;
+            let err_y = wp.y - state.y;
+            let err_fwd = err_x * cos_t + err_y * sin_t;
+            let err_lat = -err_x * sin_t + err_y * cos_t;
+            let err_hdg = angle(wp.theta - state.theta);
+
+            target_lin = (target_lin + KP_FWD * err_fwd).clamp(0.0f32, 0.8f32);
+            target_ang = (target_ang + KP_LAT * err_lat + KP_HDG * err_hdg).clamp(-3.0f32, 3.0f32);
         }
 
-        // 1. Differential drive: split linear + angular into per-wheel velocities
-        let target_left_v = target_lin - (target_ang * WHEEL_BASE / 2.0);
-        let target_right_v = target_lin + (target_ang * WHEEL_BASE / 2.0);
+        // Gyro angular rate feedback: correct target_ang with the difference between
+        // commanded and actual yaw rate. gyro[2] is negated to match our coord convention
+        // (IMU is mounted upside-down; fusion.rs applies the same sign flip).
+        let actual_omega = LATEST_MPU
+            .lock(|c| c.get())
+            .map(|d| -d.gyro[2])
+            .unwrap_or(0.0);
+        let corrected_ang = target_ang + K_ANG * (target_ang - actual_omega);
 
-        // 2. Measure actual wheel velocities from hall-sensor ticks
-        let current_left_ticks = LEFT_TICKS_TOTAL.load(Ordering::Relaxed);
-        let current_right_ticks = RIGHT_TICKS_TOTAL.load(Ordering::Relaxed);
-        let delta_left = current_left_ticks - last_left_ticks;
-        let delta_right = current_right_ticks - last_right_ticks;
-        last_left_ticks = current_left_ticks;
-        last_right_ticks = current_right_ticks;
-        // Only 2 ticks/rev — velocity is coarse but sufficient for feedback correction
-        let actual_left_v = (delta_left as f32 * distance_per_tick) / DT;
-        let actual_right_v = (delta_right as f32 * distance_per_tick) / DT;
+        // Per-wheel velocity targets from differential drive kinematics.
+        let target_left_v = target_lin - corrected_ang * WHEEL_BASE / 2.0;
+        let target_right_v = target_lin + corrected_ang * WHEEL_BASE / 2.0;
 
-        // 3. Feedforward + PI
-        // FF maps desired velocity directly to an estimated PWM fraction.
-        // PI corrects the residual error caused by FF inaccuracy / load changes.
+        // Actual wheel velocities from inter-tick timestamps, then low-pass filtered.
+        // Filtering before the PI prevents per-tick velocity estimation jitter
+        // (elapsed_us grows every frame even without a new tick) from driving hard corrections.
+        let now_us = Instant::now().as_micros() as u32;
+        smooth_left_v = V_EMA_ALPHA * left_wheel_velocity(now_us)
+            + (1.0 - V_EMA_ALPHA) * smooth_left_v;
+        smooth_right_v = V_EMA_ALPHA * right_wheel_velocity(now_us)
+            + (1.0 - V_EMA_ALPHA) * smooth_right_v;
+
+        // Feedforward + PI (PI error uses smoothed velocity to suppress noise)
         let ff = get_ff_v_to_pwm();
 
-        let left_error = target_left_v - actual_left_v;
+        let left_error = target_left_v - smooth_left_v;
         left_integral = (left_integral + left_error * DT).clamp(-0.5, 0.5);
-        let left_out = target_left_v * ff + KP * left_error + KI * left_integral;
+        let left_raw = target_left_v * ff + KP * left_error + KI * left_integral;
 
-        let right_error = target_right_v - actual_right_v;
+        let right_error = target_right_v - smooth_right_v;
         right_integral = (right_integral + right_error * DT).clamp(-0.5, 0.5);
-        let right_out = target_right_v * ff + KP * right_error + KI * right_integral;
+        let right_raw = target_right_v * ff + KP * right_error + KI * right_integral;
 
-        // 4. Apply — brake when no trajectory is active to avoid integrator windup drift
-        if target_lin == 0.0 && target_ang == 0.0 {
+        // EMA output filter: smooths the physical PWM command, removing frame-to-frame jitter.
+        // Direction lock: output sign must match target sign to prevent the PI from reversing
+        // a forward-commanded wheel during deceleration.
+        let left_out = (EMA_ALPHA * left_raw + (1.0 - EMA_ALPHA) * prev_left_out)
+            .clamp(
+                if target_left_v < 0.0 { -1.0 } else { 0.0 },
+                if target_left_v > 0.0 { 1.0 } else { 0.0 },
+            );
+        let right_out = (EMA_ALPHA * right_raw + (1.0 - EMA_ALPHA) * prev_right_out)
+            .clamp(
+                if target_right_v < 0.0 { -1.0 } else { 0.0 },
+                if target_right_v > 0.0 { 1.0 } else { 0.0 },
+            );
+
+        if last_waypoint.is_none() {
             left_motor.brake();
             right_motor.brake();
+            prev_left_out = 0.0;
+            prev_right_out = 0.0;
         } else {
-            left_motor.set_speed(left_out.clamp(-1.0, 1.0));
-            right_motor.set_speed(right_out.clamp(-1.0, 1.0));
+            left_motor.set_speed(left_out);
+            right_motor.set_speed(right_out);
+            prev_left_out = left_out;
+            prev_right_out = right_out;
         }
 
         20.ms_timer().await;
@@ -214,7 +292,7 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
         // --- DEADBAND COMPENSATION ---
         // DC Motors cannot run below a certain PWM threshold (approx 20%).
         // We remap the logical (0.0, 1.0] speed to [MIN_PWM, 1.0].
-        const MIN_PWM: f32 = 0.20;
+        const MIN_PWM: f32 = 0.10;
         let abs_speed = speed.abs();
         let effective_speed = MIN_PWM + abs_speed * (1.0 - MIN_PWM);
 

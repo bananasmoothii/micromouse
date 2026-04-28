@@ -1,5 +1,10 @@
+use crate::devices::hall_sensor_3144::{
+    LEFT_FORWARD, LEFT_LAST_TICK_US, LEFT_TICK_INTERVAL_US,
+    RIGHT_FORWARD, RIGHT_LAST_TICK_US, RIGHT_TICK_INTERVAL_US,
+};
 use crate::positioning::types::MovementDelta;
 use core::f32::consts::PI;
+use core::sync::atomic::Ordering;
 use micromath::F32Ext;
 
 /// Physical radius of the wheels in meters. Matches the actual tire size.
@@ -12,6 +17,48 @@ pub const WHEEL_BASE: f32 = 0.078;
 pub const TICKS_PER_REVOLUTION: f32 = 2.0;
 
 pub const DISTANCE_PER_TICK: f32 = 2.0 * core::f32::consts::PI * WHEEL_RADIUS / TICKS_PER_REVOLUTION;
+
+/// Robot considered stopped if no tick arrives within this window.
+/// At ~0.09 m/s (near-stall), tick period is ~700 ms.
+const MAX_TICK_GAP_US: u32 = 700_000;
+
+/// Smooth signed wheel velocity (m/s) derived from inter-tick timestamps.
+///
+/// Uses `max(elapsed_since_last_tick, last_tick_interval)` as the effective period:
+/// - Constant speed: elapsed ≈ interval → stable velocity.
+/// - Decelerating: elapsed > interval → period grows → velocity decreases smoothly without waiting for the next tick.
+/// - Stopped: elapsed exceeds MAX_TICK_GAP_US → returns 0.
+/// - Fewer than two ticks fired (interval == 0): returns 0.
+pub fn smooth_wheel_velocity(last_us: u32, interval_us: u32, now_us: u32, forward: bool) -> f32 {
+    if interval_us == 0 {
+        return 0.0;
+    }
+    let elapsed_us = now_us.wrapping_sub(last_us);
+    if elapsed_us > MAX_TICK_GAP_US {
+        return 0.0;
+    }
+    let period_us = elapsed_us.max(interval_us);
+    let v = DISTANCE_PER_TICK / (period_us as f32 * 1e-6);
+    if forward { v } else { -v }
+}
+
+pub fn left_wheel_velocity(now_us: u32) -> f32 {
+    smooth_wheel_velocity(
+        LEFT_LAST_TICK_US.load(Ordering::Relaxed),
+        LEFT_TICK_INTERVAL_US.load(Ordering::Relaxed),
+        now_us,
+        LEFT_FORWARD.load(Ordering::Relaxed),
+    )
+}
+
+pub fn right_wheel_velocity(now_us: u32) -> f32 {
+    smooth_wheel_velocity(
+        RIGHT_LAST_TICK_US.load(Ordering::Relaxed),
+        RIGHT_TICK_INTERVAL_US.load(Ordering::Relaxed),
+        now_us,
+        RIGHT_FORWARD.load(Ordering::Relaxed),
+    )
+}
 
 pub struct OdometryProcessor {
     left_ticks: i32,
