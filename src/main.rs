@@ -13,7 +13,7 @@ pub mod utils;
 
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, buzzer_task};
-use crate::devices::hall_sensor_3144::{WheelSide, hall_sensor_continuous_measuring};
+use crate::devices::hall_sensor_3144::{LEFT_FORWARD, RIGHT_FORWARD, WheelSide, hall_sensor_continuous_measuring};
 use crate::devices::motors::{Motor, motor_controller_task};
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::MeasurementData;
@@ -22,9 +22,7 @@ use crate::dimensions::LAB_CELL;
 use crate::i2c_devices::init_i2c_devices;
 use crate::labyrinth::Labyrinth;
 use crate::positioning::{CURRENT_STATE, positioning_task};
-use crate::trajectory::{
-    SmoothCornerOptimizer, Trajectory, TrajectoryOptimizer, VelocityProfileOptimizer,
-};
+use crate::trajectory::{Segment, SmoothCornerOptimizer, Trajectory, TrajectoryOptimizer, VelocityProfileOptimizer};
 use crate::utils::{DurationUtils, HertzUtils};
 use alloc::boxed::Box;
 use alloc::vec;
@@ -48,6 +46,7 @@ use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
 use micromath::F32Ext;
+use crate::trajectory::config::{MAX_ACCELERATION, MAX_SPEED};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -116,8 +115,8 @@ async fn main(mut spawner: Spawner) {
         CountingMode::EdgeAlignedUp,
     );
 
-    let mut motor1 = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1);
-    let mut motor2 = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3);
+    let mut motor1 = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1, &LEFT_FORWARD);
+    let mut motor2 = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3, &RIGHT_FORWARD);
 
     // motor1.set_speed(0.20);
     // motor2.set_speed(0.20);
@@ -137,7 +136,7 @@ async fn main(mut spawner: Spawner) {
         .spawn(motor_controller_task(motor1, motor2))
         .unwrap();
     // spawner.spawn(maze_runner_task()).unwrap();
-    spawner.spawn(motor_tests()).unwrap();
+    // spawner.spawn(motor_tests()).unwrap();
 
     init_i2c_devices(
         &mut spawner,
@@ -269,25 +268,16 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
 }
 
 #[embassy_executor::task]
-async fn motor_task(mut motor1: Motor<'static, TIM3>) {
-    // minimum speed percentage seems to be 9%
-    for i in 9..=100 {
-        motor1.set_speed(i as f32 * 0.01);
-        info!("speed: {}%", i);
-        100.ms_timer().await;
-    }
-    info!("reached max speed");
-
-    // if this function ends, pins are dropped and the motor halts
-    5000.s_timer().await;
-
-    // motor1.set_speed(0.5);
-    // loop {
-    //     motor1.set_direction(MotorDirection::Forward);
-    //     1.s_timer().await;
-    //     motor1.set_direction(MotorDirection::Reverse);
-    //     1.s_timer().await;
-    // }
+async fn motor_tests() {
+    2.s_timer().await;
+    let trajectory = Trajectory::new(vec![Segment::Straight {
+        distance: 1.0,
+        max_speed: MAX_SPEED,
+        entry_speed: 0.0,
+        exit_speed: 0.0,
+        acceleration: MAX_ACCELERATION,
+    }]);
+    trajectory.execute().await;
 }
 
 /// Imaginary-maze test: executes cell-by-cell, updating wall knowledge from the

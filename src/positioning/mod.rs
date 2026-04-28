@@ -62,7 +62,7 @@ pub async fn positioning_task() {
         let odom_delta = odom_proc.update();
 
         let state = fusion_proc.update(odom_delta, mpu_result);
-        info!("Position -> X: {}, Y: {}, Theta: {}", state.x, state.y, state.theta);
+        info!("Position: {},  left ticks: {}, right ticks: {}", state, current_left_ticks, current_right_ticks);
         CURRENT_STATE.lock(|cell| cell.set(state));
 
         // Processing loop rate

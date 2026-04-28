@@ -4,13 +4,14 @@ use crate::labyrinth::Labyrinth;
 use crate::positioning::CURRENT_STATE;
 use alloc::vec::Vec;
 use core::cell::Cell;
+use core::f32::consts::{PI, TAU};
 use micromath::F32Ext;
 
 pub mod config {
     /// Maximum linear velocity in m/s
     pub const MAX_SPEED: f32 = 0.8;
     /// Maximum linear acceleration in m/s^2
-    pub const MAX_ACCELERATION: f32 = 1.0;
+    pub const MAX_ACCELERATION: f32 = 0.5;
     /// Radius of the smooth arcs at corners in meters
     pub const CORNER_RADIUS: f32 = 0.05;
     /// The constant speed at which corners are taken in m/s
@@ -227,7 +228,7 @@ macro_rules! iterate_trajectory {
                     let mut current_v = *entry_speed;
                     let mut dist_covered = 0.0;
                     while dist_covered < *distance {
-                        let decel_dist = (current_v * current_v - exit_speed.powi(2)).max(0.0)
+                        let decel_dist = (current_v.powi(2) - exit_speed.powi(2)).max(0.0)
                             / (2.0 * acceleration);
                         let target_v = if *distance - dist_covered <= decel_dist {
                             (current_v - acceleration * DT).max(*exit_speed)
@@ -288,6 +289,10 @@ macro_rules! iterate_trajectory {
 }
 
 impl Trajectory {
+    pub fn new(segments: Vec<Segment>) -> Self {
+        Self { segments }
+    }
+
     /// Builds a basic trajectory strictly following cell centers
     pub fn from_cell_path(path: &[(usize, usize)]) -> Self {
         let mut segments = Vec::new();
@@ -325,13 +330,11 @@ impl Trajectory {
 
                 let mut angle = next_theta - current_theta;
                 // normalize between -PI and PI
-                let pi = core::f32::consts::PI;
-                let tau = 2.0 * pi;
-                while angle > pi {
-                    angle -= tau;
+                while angle > PI {
+                    angle -= TAU;
                 }
-                while angle < -pi {
-                    angle += tau;
+                while angle < -PI {
+                    angle += TAU;
                 }
 
                 segments.push(Segment::TurnInPlace {
