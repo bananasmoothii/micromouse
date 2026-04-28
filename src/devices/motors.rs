@@ -57,15 +57,16 @@ pub const KI: f32 = 0.02;
 /// (so FF_V_TO_PWM = 1.0 / 0.8 = 1.25).
 // Feedforward stored as atomic bits so it can be calibrated at runtime.
 // Tune: if robot is too slow increase, if too fast decrease (= 1/max_speed_at_full_pwm).
-static FF_V_TO_PWM_BITS: AtomicU32 = AtomicU32::new(0.2f32.to_bits());
+// TODO: find the correct value
+static FEEDFORWARD_V_TO_PWM_BITS: AtomicU32 = AtomicU32::new(0.2f32.to_bits());
 
 #[inline]
 pub fn get_ff_v_to_pwm() -> f32 {
-    f32::from_bits(FF_V_TO_PWM_BITS.load(Ordering::Relaxed))
+    f32::from_bits(FEEDFORWARD_V_TO_PWM_BITS.load(Ordering::Relaxed))
 }
 
 pub fn set_ff_v_to_pwm(v: f32) {
-    FF_V_TO_PWM_BITS.store(v.to_bits(), Ordering::Relaxed);
+    FEEDFORWARD_V_TO_PWM_BITS.store(v.to_bits(), Ordering::Relaxed);
 }
 
 fn angle(angle: f32) -> f32 {
@@ -99,6 +100,12 @@ const MAX_LAG_M: f32 = 0.12;
 /// actual yaw rate (rad/s) to an additive angular velocity correction (rad/s).
 /// Increase to react more aggressively to wheel imbalance; decrease if oscillatory.
 const K_ANG: f32 = 0.10;
+
+/// Minimum average wheel speed (m/s) before position-error angular corrections are applied.
+/// Below this threshold the EKF theta is still dominated by tick-phase noise; applying lateral
+/// and heading corrections from it would steer the robot based on phantom turns.
+/// The gyro angular rate feedback (K_ANG) remains active at all speeds.
+const MIN_V_ANGULAR_CORRECTION: f32 = 0.05;
 
 #[embassy_executor::task]
 pub async fn motor_controller_task(
@@ -166,15 +173,22 @@ pub async fn motor_controller_task(
 
         // Soft position correction toward the current waypoint.
         // Adds to (not replaces) the trajectory velocity so corrections are bounded.
+        // Angular corrections (lateral + heading) are gated on minimum speed: below the threshold
+        // the EKF theta is still dominated by tick-phase noise, so steering from it causes
+        // phantom corrections.  Forward correction and gyro rate feedback are always active.
         if let Some(wp) = &last_waypoint {
             let err_x = wp.x - state.x;
             let err_y = wp.y - state.y;
             let err_fwd = err_x * cos_t + err_y * sin_t;
-            let err_lat = -err_x * sin_t + err_y * cos_t;
-            let err_hdg = angle(wp.theta - state.theta);
 
             target_lin = (target_lin + KP_FWD * err_fwd).clamp(0.0f32, 0.8f32);
-            target_ang = (target_ang + KP_LAT * err_lat + KP_HDG * err_hdg).clamp(-3.0f32, 3.0f32);
+
+            let center_v = (smooth_left_v + smooth_right_v) / 2.0;
+            if center_v.abs() >= MIN_V_ANGULAR_CORRECTION {
+                let err_lat = -err_x * sin_t + err_y * cos_t;
+                let err_hdg = angle(wp.theta - state.theta);
+                target_ang = (target_ang + KP_LAT * err_lat + KP_HDG * err_hdg).clamp(-3.0f32, 3.0f32);
+            }
         }
 
         // Gyro angular rate feedback: correct target_ang with the difference between

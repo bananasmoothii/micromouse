@@ -1,7 +1,9 @@
+use crate::devices::hall_sensor_3144::{LEFT_TICK_INTERVAL_US, RIGHT_TICK_INTERVAL_US};
 use crate::positioning::mpu::MpuResult;
 use crate::positioning::odometry::{left_wheel_velocity, right_wheel_velocity};
 use crate::positioning::types::{MovementDelta, Position2D};
 use core::f32::consts::PI;
+use core::sync::atomic::Ordering;
 use embassy_time::Instant;
 use micromath::F32Ext;
 
@@ -48,11 +50,11 @@ impl SensorFusion {
             odom_global_y: 0.0,
             p_theta: 1.0,
             q_theta: 0.001,
-            r_theta_odom: 1.0,  // High value → gyro dominates; odometry barely corrects solo-tick noise
+            r_theta_odom: 1.5,  // High value → gyro dominates; odometry barely corrects solo-tick noise
             r_theta_mag: 5.0,   // Slightly more mag trust to compensate for reduced odom correction
             p_xy: 1.0,
             q_xy: 0.005,
-            r_xy_odom: 0.02,
+            r_xy_odom: 0.2,
         }
     }
 
@@ -67,11 +69,18 @@ impl SensorFusion {
         self.state.theta += mpu_delta.d_theta;
         self.p_theta += self.q_theta;
 
-        // 2. Update (using Odometry delta)
-        let z_odom = odom_delta.d_theta - mpu_delta.d_theta;
-        let k_odom = self.p_theta / (self.p_theta + self.r_theta_odom);
-        self.state.theta += k_odom * z_odom;
-        self.p_theta = (1.0 - k_odom) * self.p_theta;
+        // 2. Update (using Odometry delta) — only once both wheels have seen at least two
+        //    consecutive ticks (interval > 0).  Before that, a solo tick makes d_theta look
+        //    like a ~46° turn even on a perfectly straight run; gyro-only is far more accurate
+        //    during those first few revolutions.
+        let odom_synced = LEFT_TICK_INTERVAL_US.load(Ordering::Relaxed) > 0
+            && RIGHT_TICK_INTERVAL_US.load(Ordering::Relaxed) > 0;
+        if odom_synced {
+            let z_odom = odom_delta.d_theta - mpu_delta.d_theta;
+            let k_odom = self.p_theta / (self.p_theta + self.r_theta_odom);
+            self.state.theta += k_odom * z_odom;
+            self.p_theta = (1.0 - k_odom) * self.p_theta;
+        }
 
         // 3. Update (using Magnetometer absolute heading)
         let mut z_mag = mag_heading - self.state.theta;

@@ -272,6 +272,7 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
 #[embassy_executor::task]
 async fn motor_tests() {
     2.s_timer().await;
+    // TODO: If the segment is supposed to be 1.0 meter, why does it alwyas stop at approx. 1.35 meter ? 80.555053 [INFO ] Position: x: 1.35 y: 0.03 theta: 3.8° v_x: 0.00 v_y: 0.00,  left ticks: 25, right ticks: 22 (test src/positioning/mod.rs:65)
     let trajectory = Trajectory::new(vec![Segment::Straight {
         distance: 1.0,
         max_speed: MAX_SPEED,
