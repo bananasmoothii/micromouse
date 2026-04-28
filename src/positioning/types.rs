@@ -17,7 +17,7 @@ impl Format for Position2D {
             "x: {} y: {} theta: {}° v_x: {} v_y: {}",
             format!("{:.2}", self.x).as_str(),
             format!("{:.2}", self.y).as_str(),
-            format!("{:.3}", self.theta.to_degrees()).as_str(),
+            format!("{:.1}", self.theta.to_degrees()).as_str(),
             format!("{:.2}", self.v_x).as_str(),
             format!("{:.2}", self.v_y).as_str()
         );

@@ -11,6 +11,8 @@ pub const WHEEL_BASE: f32 = 0.078;
 /// Raw odometry resolution: Number of hall effect ticks generated per full wheel revolution.
 pub const TICKS_PER_REVOLUTION: f32 = 2.0;
 
+pub const DISTANCE_PER_TICK: f32 = 2.0 * core::f32::consts::PI * WHEEL_RADIUS / TICKS_PER_REVOLUTION;
+
 pub struct OdometryProcessor {
     left_ticks: i32,
     right_ticks: i32,

@@ -1,7 +1,18 @@
+use crate::devices::hall_sensor_3144::{
+    LEFT_FORWARD, LEFT_LAST_TICK_US, LEFT_TICK_INTERVAL_US,
+    RIGHT_FORWARD, RIGHT_LAST_TICK_US, RIGHT_TICK_INTERVAL_US,
+};
 use crate::positioning::mpu::MpuResult;
+use crate::positioning::odometry::DISTANCE_PER_TICK;
 use crate::positioning::types::{MovementDelta, Position2D};
 use core::f32::consts::PI;
+use core::sync::atomic::Ordering;
+use embassy_time::Instant;
 use micromath::F32Ext;
+
+/// Robot considered stopped if no tick arrives within this window.
+/// At minimum speed (~0.1 m/s), tick period is ~630 ms, so 700 ms is a safe threshold.
+const MAX_TICK_GAP_US: u32 = 700_000;
 
 pub struct SensorFusion {
     state: Position2D,
@@ -32,7 +43,7 @@ pub struct SensorFusion {
 
     /// Covariance tracking for our X/Y coordinates
     p_xy: f32,
-    /// Acceleration process noise (how much the accelerometer double-integration drifts laterally)
+    /// Position process noise per step (uncertainty growth between odometry corrections)
     q_xy: f32,
     /// Odometry absolute measurement noise. Lower value means we trust the odometry distance more.
     r_xy_odom: f32,
@@ -49,16 +60,34 @@ impl SensorFusion {
             r_theta_odom: 0.05,
             r_theta_mag: 10.0, // High noise -> weak but steady long-term correction
             p_xy: 1.0,
-            q_xy: 0.005,     // Acceleration noise per step
-            r_xy_odom: 0.02, // Trust bounds for wheel slippage and chunky resolution
+            q_xy: 0.005,
+            r_xy_odom: 0.02,
         }
+    }
+
+    /// Compute signed wheel velocity from inter-tick timing.
+    ///
+    /// Uses `max(elapsed_since_last_tick, last_tick_interval)` as the effective period:
+    /// - Constant speed: elapsed ≈ interval → stable velocity.
+    /// - Decelerating: elapsed > interval → period grows → velocity decreases smoothly.
+    /// - Stopped: elapsed hits MAX_TICK_GAP_US → returns 0.
+    /// - Not yet two ticks: interval == 0 → returns 0.
+    fn wheel_velocity(last_us: u32, interval_us: u32, now_us: u32, forward: bool) -> f32 {
+        if interval_us == 0 {
+            return 0.0;
+        }
+        let elapsed_us = now_us.wrapping_sub(last_us);
+        if elapsed_us > MAX_TICK_GAP_US {
+            return 0.0;
+        }
+        let period_us = elapsed_us.max(interval_us);
+        let v = DISTANCE_PER_TICK / (period_us as f32 * 1e-6);
+        if forward { v } else { -v }
     }
 
     pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult) -> Position2D {
         let dt = mpu.dt;
         let mpu_delta = mpu.delta;
-        let accel_x = mpu.accel_x;
-        let accel_y = mpu.accel_y;
         let mag_heading = mpu.relative_mag;
 
         // --- 1D Kalman Filter for Theta ---
@@ -68,11 +97,8 @@ impl SensorFusion {
         self.p_theta += self.q_theta;
 
         // 2. Update (using Odometry delta)
-        let z_odom = odom_delta.d_theta - mpu_delta.d_theta; // Measurement residual
-
-        let s_odom = self.p_theta + self.r_theta_odom; // Innovation covariance
-        let k_odom = self.p_theta / s_odom; // Kalman gain
-
+        let z_odom = odom_delta.d_theta - mpu_delta.d_theta;
+        let k_odom = self.p_theta / (self.p_theta + self.r_theta_odom);
         self.state.theta += k_odom * z_odom;
         self.p_theta = (1.0 - k_odom) * self.p_theta;
 
@@ -84,14 +110,11 @@ impl SensorFusion {
         while z_mag < -PI {
             z_mag += 2.0 * PI;
         }
-
-        let s_mag = self.p_theta + self.r_theta_mag;
-        let k_mag = self.p_theta / s_mag;
-
+        let k_mag = self.p_theta / (self.p_theta + self.r_theta_mag);
         self.state.theta += k_mag * z_mag;
         self.p_theta = (1.0 - k_mag) * self.p_theta;
 
-        // Normalize theta to [-PI, PI] to keep math clean
+        // Normalize theta to [-PI, PI]
         while self.state.theta > PI {
             self.state.theta -= 2.0 * PI;
         }
@@ -101,35 +124,36 @@ impl SensorFusion {
 
         let (sin_theta, cos_theta) = self.state.theta.sin_cos();
 
-        // --- 2D Position Kalman Filter (Using Accelerometer & Odometry) ---
-        // Because Odometry has incredibly low resolution (2 ticks per rev) and wheels slip on turns,
-        // we use the accelerometer to PREDICT rapid lateral and forward motion between ticks.
-        // Odometry is our periodic MEASUREMENT correction pulling the position back to reality.
+        // --- 2D Position Kalman Filter ---
 
-        let a_x = accel_x * 9.81; // Convert g to m/s^2
-        let a_y = accel_y * 9.81;
+        // 1. Velocity from per-wheel tick timestamps.
+        //    The effective period = max(elapsed_since_last_tick, last_tick_interval) so velocity
+        //    naturally decreases as the robot slows down without needing another tick to fire.
+        //    This is inherently adaptive: faster → shorter period → responsive;
+        //    slower → longer period → smooth.
+        let now_us = Instant::now().as_micros() as u32;
+        let v_left = Self::wheel_velocity(
+            LEFT_LAST_TICK_US.load(Ordering::Relaxed),
+            LEFT_TICK_INTERVAL_US.load(Ordering::Relaxed),
+            now_us,
+            LEFT_FORWARD.load(Ordering::Relaxed),
+        );
+        let v_right = Self::wheel_velocity(
+            RIGHT_LAST_TICK_US.load(Ordering::Relaxed),
+            RIGHT_TICK_INTERVAL_US.load(Ordering::Relaxed),
+            now_us,
+            RIGHT_FORWARD.load(Ordering::Relaxed),
+        );
+        let v_center = (v_left + v_right) / 2.0;
+        self.state.v_x = v_center * cos_theta;
+        self.state.v_y = v_center * sin_theta;
 
-        // 1. Predict (Using Accelerometer)
-        // Integration Method:
-        // - Velocity uses standard Euler integration ("left rectangles" rule): v_new = v_old + a * dt
-        // - Position uses the precise constant-acceleration kinematic equation: p_new = p_old + v_old * dt + 0.5 * a * dt^2
-        let a_x_global = a_x * cos_theta - a_y * sin_theta;
-        let a_y_global = a_x * sin_theta + a_y * cos_theta;
-
-        self.state.x += self.state.v_x * dt + 0.5 * a_x_global * dt * dt;
-        self.state.y += self.state.v_y * dt + 0.5 * a_y_global * dt * dt;
-
-        self.state.v_x += a_x_global * dt;
-        self.state.v_y += a_y_global * dt;
-
-        // Prevent integration from growing to infinity from generic sensor bias by softly decaying
-        self.state.v_x *= 0.95;
-        self.state.v_y *= 0.95;
-
+        // 2. Predict position using smoothed velocity
+        self.state.x += self.state.v_x * dt;
+        self.state.y += self.state.v_y * dt;
         self.p_xy += self.q_xy;
 
-        // 2. Update (Using Odometry)
-        // Map the new chunky ticks incrementally into our ideal global odometer mapping
+        // 3. Correct position using cumulative odometry
         let delta_center = odom_delta.dx;
         self.odom_global_x += delta_center * cos_theta;
         self.odom_global_y += delta_center * sin_theta;
@@ -137,19 +161,9 @@ impl SensorFusion {
         let z_x = self.odom_global_x - self.state.x;
         let z_y = self.odom_global_y - self.state.y;
 
-        let s_xy = self.p_xy + self.r_xy_odom;
-        let k_xy = self.p_xy / s_xy;
-
+        let k_xy = self.p_xy / (self.p_xy + self.r_xy_odom);
         self.state.x += k_xy * z_x;
         self.state.y += k_xy * z_y;
-
-        // When the position jumps due to an odometry tick correction, give the velocity a bump
-        // so it smoothly merges back with the physical reality.
-        if dt > 0.0 {
-            self.state.v_x += (k_xy * z_x) * 0.5 / dt;
-            self.state.v_y += (k_xy * z_y) * 0.5 / dt;
-        }
-
         self.p_xy = (1.0 - k_xy) * self.p_xy;
 
         self.state.clone()
