@@ -28,7 +28,7 @@ impl Default for TimingConfig {
     }
 }
 
-trait MeasurementData<S> {
+pub trait MeasurementData<S> {
     fn get_distance_mm(&self) -> i16;
 
     fn get_sigma_mm(&self) -> f64;

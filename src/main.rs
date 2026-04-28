@@ -14,15 +14,23 @@ pub mod utils;
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, buzzer_task};
 use crate::devices::hall_sensor_3144::{WheelSide, hall_sensor_continuous_measuring};
-use crate::devices::motors::Motor;
+use crate::devices::motors::{Motor, motor_controller_task};
 use crate::devices::mpu9250::Mpu9250Sensor;
-use crate::devices::vl53lxx::vl53l1x::VL53L1XSensor;
+use crate::devices::vl53lxx::MeasurementData;
+use crate::devices::vl53lxx::vl53l1x::{VL53L1X_MIDDLE_CHANNEL, VL53L1XSensor};
+use crate::dimensions::LAB_CELL;
 use crate::i2c_devices::init_i2c_devices;
-use crate::positioning::positioning_task;
+use crate::labyrinth::Labyrinth;
+use crate::positioning::{CURRENT_STATE, positioning_task};
+use crate::trajectory::{
+    SmoothCornerOptimizer, Trajectory, TrajectoryOptimizer, VelocityProfileOptimizer,
+};
 use crate::utils::{DurationUtils, HertzUtils};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::Cell;
+use core::f32::consts::PI;
 use defmt::*;
 use defmt_rtt as _;
 use embassy_executor::Spawner;
@@ -39,6 +47,7 @@ use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
+use micromath::F32Ext;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -123,8 +132,12 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-    // Start Positioning task
-    // spawner.spawn(positioning_task()).unwrap();
+    spawner.spawn(positioning_task()).unwrap();
+    spawner
+        .spawn(motor_controller_task(motor1, motor2))
+        .unwrap();
+    // spawner.spawn(maze_runner_task()).unwrap();
+    spawner.spawn(motor_tests()).unwrap();
 
     init_i2c_devices(
         &mut spawner,
@@ -275,6 +288,94 @@ async fn motor_task(mut motor1: Motor<'static, TIM3>) {
     //     motor1.set_direction(MotorDirection::Reverse);
     //     1.s_timer().await;
     // }
+}
+
+/// Imaginary-maze test: executes cell-by-cell, updating wall knowledge from the
+/// forward ToF sensor after each step so the path adapts when walls appear/disappear.
+#[embassy_executor::task]
+async fn maze_runner_task() -> ! {
+    // Let positioning and sensors stabilize.
+    2.s_timer().await;
+    info!("Maze runner: starting");
+
+    // ── Imaginary labyrinth ─────────────────────────────────────────────────
+    // Edit these walls to change the test path.  The pathfinder targets (10,10).
+    let mut lab = Labyrinth::new();
+    for y in 0..4 {
+        lab.ray_east_wall(4, y, true);
+    } // vertical barrier at x=4
+    for x in 5..8 {
+        lab.ray_south_wall(x, 4, true);
+    } // horizontal barrier at y=4
+    lab.update_cell_distance(0, 0);
+    // ────────────────────────────────────────────────────────────────────────
+
+    loop {
+        // Current cell from EKF position.
+        let (cx, cy) = {
+            let s = CURRENT_STATE.lock(Cell::get);
+            let x = (s.x / LAB_CELL).round() as usize;
+            let y = (s.y / LAB_CELL).round() as usize;
+            (x.min(15), y.min(15))
+        };
+
+        if lab.exit_distance(cx, cy) == 0 {
+            info!("Maze runner: reached exit ({}, {})", cx, cy);
+            BUZZER_CHANNEL
+                .try_send(BuzzerTask {
+                    freq: 1047.hz(),
+                    duration: 600.ms(),
+                })
+                .ok();
+            loop {
+                5.s_timer().await;
+            }
+        }
+
+        // Drain the forward sensor and update the wall ahead.
+        let theta = CURRENT_STATE.lock(Cell::get).theta;
+        let heading = ((theta / (PI / 2.0)).round() as i32).rem_euclid(4);
+        // heading: 0=+x (East), 1=+y, 2=-x (West), 3=-y
+        let (dx, dy): (isize, isize) = match heading {
+            0 => (1, 0),
+            1 => (0, 1),
+            2 => (-1, 0),
+            _ => (0, -1),
+        };
+        while let Ok(data) = VL53L1X_MIDDLE_CHANNEL.try_receive() {
+            let wall = data.get_distance_mm() < 90;
+            let nx = (cx as isize + dx) as usize;
+            let ny = (cy as isize + dy) as usize;
+            if nx < 16 && ny < 16 {
+                if dx != 0 {
+                    lab.ray_east_wall(if dx > 0 { cx } else { nx }, cy, wall);
+                } else {
+                    lab.ray_south_wall(cx, if dy > 0 { cy } else { ny }, wall);
+                }
+            }
+        }
+
+        // Plan one cell forward and execute.
+        let (nx, ny) = lab.next_cell(cx, cy);
+        if nx == cx && ny == cy {
+            warn!("Maze runner: stuck at ({}, {}), retrying", cx, cy);
+            50.ms_timer().await;
+            continue;
+        }
+        info!("Maze runner: ({},{}) → ({},{})", cx, cy, nx, ny);
+
+        let raw = Trajectory::from_cell_path(&[(cx, cy), (nx, ny)]);
+        let raw = SmoothCornerOptimizer {
+            radius: trajectory::config::CORNER_RADIUS,
+            corner_speed: trajectory::config::CORNER_SPEED,
+        }
+            .optimize(raw);
+        let traj = VelocityProfileOptimizer {
+            max_acceleration: trajectory::config::MAX_ACCELERATION,
+        }
+            .optimize(raw);
+        traj.execute().await;
+    }
 }
 
 fn poc_trajectory_svg() {
