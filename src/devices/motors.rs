@@ -1,7 +1,9 @@
-use core::cell::Cell;
-use defmt::error;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
-use core::f32::consts::PI;
+use crate::positioning::CURRENT_STATE;
+use crate::positioning::odometry::{TICKS_PER_REVOLUTION, WHEEL_BASE, WHEEL_RADIUS};
+use crate::utils::DurationUtils;
+use core::cell::Cell;
+use core::f32::consts::{PI, TAU};
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{error, trace, warn};
 use embassy_executor::Spawner;
@@ -9,15 +11,10 @@ use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
-use embassy_stm32::{Peri, peripherals};
 use embassy_stm32::{Peri, PeripheralType, peripherals};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel as SyncChannel;
 use embassy_time::{Duration, Timer};
-use core::f32::consts::{PI, TAU};
-use crate::positioning::CURRENT_STATE;
-use crate::positioning::odometry::{WHEEL_RADIUS, WHEEL_BASE, TICKS_PER_REVOLUTION};
-use crate::utils::DurationUtils;
 
 pub const DT: f32 = 0.02; // 20ms control loop iteration length
 
@@ -32,8 +29,6 @@ pub static PATH_CHANNEL: SyncChannel<CriticalSectionRawMutex, PathPoint, 32> = S
 
 /// Global flag set by the overcurrent protection task to immediately halt motors
 pub static OVERCURRENT_FAULT: AtomicBool = AtomicBool::new(false);
-
-use crate::positioning::odometry::{TICKS_PER_REVOLUTION, WHEEL_BASE, WHEEL_RADIUS};
 
 // NOTE regarding concurrency design:
 // By using `AtomicI32` for incremental odometry ticks we avoid dropped packets.
@@ -94,7 +89,11 @@ pub async fn motor_controller_task(
         // Try reading next path point
         if let Ok(next_point) = PATH_CHANNEL.try_receive() {
             let state = CURRENT_STATE.lock(Cell::get);
-            let estim_pos = PathPoint {x: state.x, y: state.y, theta: state.theta};
+            let estim_pos = PathPoint {
+                x: state.x,
+                y: state.y,
+                theta: state.theta,
+            };
 
             if has_first_point {
                 // Calculate required velocities to get from last target to this target in exactly DT.
@@ -242,8 +241,8 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
 #[embassy_executor::task]
 pub async fn overcurrent_protection_task(
     mut adc_module: Adc<'static, peripherals::ADC2>,
-    mut sense_motor1: Peri<'static, peripherals::PA0>,
-    mut sense_motor2: Peri<'static, peripherals::PA1>,
+    mut sense_motor1: Peri<'static, peripherals::PA4>,
+    mut sense_motor2: Peri<'static, peripherals::PB0>,
 ) -> ! {
     // Constantes basées sur la datasheet VNH2SP30
     const K: f32 = 11370.0; // Ratio typique
@@ -276,6 +275,9 @@ pub async fn overcurrent_protection_task(
         let current_amps1 = (v_sense1 / R_SENSE) * K;
         let current_amps2 = (v_sense2 / R_SENSE) * K;
 
+        // Both channels at saturation → sense pins are floating (motor driver unpowered).
+        // A real overcurrent on small motors stays well below 15 A.
+        // if current_amps1 < 15.0 || current_amps2 < 15.0 {
         if current_amps1 > 4.0 || current_amps2 > 4.0 {
             error!("Overcurrent ! M1: {} A, M2: {} A", current_amps1, current_amps2);
             OVERCURRENT_FAULT.store(true, Ordering::Relaxed);
@@ -286,6 +288,7 @@ pub async fn overcurrent_protection_task(
             // Optional auto-recovery:
             // OVERCURRENT_FAULT.store(false, Ordering::Relaxed);
         }
+        // }
 
         20.ms_timer().await;
     }

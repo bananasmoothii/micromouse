@@ -1,5 +1,6 @@
 use cortex_m::prelude::_embedded_hal_Pwm;
-use embassy_stm32::peripherals::TIM2;
+use defmt::info;
+use embassy_stm32::peripherals::{TIM1, TIM2};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -18,11 +19,12 @@ const STARTING_BIP: bool = true;
 
 #[embassy_executor::task]
 pub async fn buzzer_task(
-    mut pwm: SimplePwm<'static, TIM2>,
+    mut pwm: SimplePwm<'static, TIM1>,
     pwm_channel: embassy_stm32::timer::Channel,
 ) {
     if STARTING_BIP {
-        for freq in [523, 659, 784, 1047] {
+        info!("Playing starting bip...");
+        for freq in INIT_MUSIC {
             BUZZER_CHANNEL
                 .send(BuzzerTask {
                     freq: freq.hz(),
@@ -43,3 +45,5 @@ pub async fn buzzer_task(
         10.ms_timer().await;
     }
 }
+
+pub const INIT_MUSIC: [u32; 4] = [523, 659, 784, 1047];

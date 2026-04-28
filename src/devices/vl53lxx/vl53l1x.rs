@@ -14,11 +14,7 @@ use embassy_time::{Duration, TimeoutError, Timer};
 use embedded_hal_bus::i2c::RefCellDevice;
 use futures_util::future::select_all;
 use vl53l1::*;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_time::{Delay, Duration, Timer};
 use embedded_hal::i2c::I2c as _;
-use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l1::RangeStatus::SIGNAL_FAIL;
 use vl53l1::*;
 
@@ -223,14 +219,14 @@ pub async fn distance_sensor_task(
             Ok(data) => {
                 let wrapped_data = RangingMeasurementData(data);
                 sensor.last_data = wrapped_data.clone();
-                trace!(
-                    "VL53L1X {:#x} read: {} mm, σ={} mm, {}",
-                    sensor.device.address(),
-                    wrapped_data.get_distance_mm(),
-                    wrapped_data.get_sigma_mm(),
-                    wrapped_data.get_status(),
-                );
-                let _ = channel.try_send(wrapped_data);
+                /*                trace!(
+                                    "VL53L1X {:#x} read: {} mm, σ={} mm, {}",
+                                    sensor.device.address(),
+                                    wrapped_data.get_distance_mm(),
+                                    wrapped_data.get_sigma_mm(),
+                                    wrapped_data.get_status(),
+                                );
+                */                let _ = channel.try_send(wrapped_data);
                 if let Err(e) = vl53l1::clear_interrupt(&mut sensor.device, &mut sensor.i2c) {
                     warn!(
                         "Error clearing interrupt for {:#x}: {:?}",

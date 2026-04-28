@@ -1,6 +1,8 @@
 use core::sync::atomic::{AtomicI32, Ordering};
 use embassy_stm32::exti::ExtiInput;
 use defmt::debug;
+use crate::devices::buzzer::{BuzzerTask, BUZZER_CHANNEL};
+use crate::utils::{DurationUtils, HertzUtils};
 
 pub static LEFT_TICKS_TOTAL: AtomicI32 = AtomicI32::new(0);
 pub static RIGHT_TICKS_TOTAL: AtomicI32 = AtomicI32::new(0);
@@ -14,6 +16,12 @@ pub enum WheelSide {
 pub async fn hall_sensor_continuous_measuring(mut pin: ExtiInput<'static>, side: WheelSide) {
     loop {
         pin.wait_for_rising_edge().await;
+        // if BUZZER_CHANNEL.try_send(BuzzerTask {
+        //     freq: 1000.hz(),
+        //     duration: 20.ms(),
+        // }).is_err() {
+        //     debug!("Failed to send buzzer task for hall sensor tick");
+        // }
         match side {
             WheelSide::Left => {
                 LEFT_TICKS_TOTAL.fetch_add(1, Ordering::Relaxed);

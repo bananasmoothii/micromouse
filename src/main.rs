@@ -6,6 +6,7 @@ mod devices;
 pub mod dimensions;
 mod i2c_devices;
 mod labyrinth;
+mod panic_handler;
 pub mod positioning;
 mod trajectory;
 pub mod utils;
@@ -15,17 +16,15 @@ use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, buzzer_task};
 use crate::devices::hall_sensor_3144::{WheelSide, hall_sensor_continuous_measuring};
 use crate::devices::motors::Motor;
 use crate::devices::mpu9250::Mpu9250Sensor;
-use crate::devices::vl53lxx::vl53l0x::VL53L0XSensor;
+use crate::devices::vl53lxx::vl53l1x::VL53L1XSensor;
 use crate::i2c_devices::init_i2c_devices;
 use crate::positioning::positioning_task;
 use crate::utils::{DurationUtils, HertzUtils};
-use crate::positioning::positioning_task;
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use defmt::*;
 use defmt_rtt as _;
-use devices::vl53lxx::vl53l1x::VL53L1XSensor;
 use embassy_executor::Spawner;
 use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::{self, ExtiInput};
@@ -33,22 +32,18 @@ use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
 use embassy_stm32::peripherals::{I2C1, TIM3};
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
-use embassy_stm32::timer::Channel::{Ch1, Ch4};
+use embassy_stm32::timer::Channel;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
 use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
-use panic_probe as _;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 const HEAP_SIZE: usize = // Add all big structs here !
-    size_of::<VL53L0XSensor>()
-        + size_of::<VL53L1XSensor>()
-        + size_of::<Mpu9250Sensor>()
-        + 10000;
+    size_of::<VL53L1XSensor>() * 3 + size_of::<Mpu9250Sensor>() + 10000;
 
 bind_interrupts!(
     struct Irqs {
@@ -76,7 +71,18 @@ async fn main(mut spawner: Spawner) {
     let p = embassy_stm32::init(Default::default());
 
     spawner
-        .spawn(battery_monitoring_task(Adc::new(p.ADC1), p.PC1, p.PC0))
+        .spawn(battery_monitoring_task(
+            Adc::new(p.ADC1),
+            None,
+            p.PC1,
+            p.PC4,
+            [
+                Output::new(p.PB1, Level::High, Speed::Low),
+                Output::new(p.PB15, Level::High, Speed::Low),
+                Output::new(p.PB14, Level::High, Speed::Low),
+                Output::new(p.PB13, Level::High, Speed::Low),
+            ],
+        ))
         .unwrap();
 
     let pwm1_pin = PwmPin::new(p.PB4, OutputType::PushPull);
@@ -103,45 +109,43 @@ async fn main(mut spawner: Spawner) {
 
     let mut motor1 = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1);
     let mut motor2 = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3);
-    // motor1.set_speed(0.25);
-    // motor2.set_speed(0.25);
-    // info!("speed set");
-    // spawner.spawn(motor_task(motor1)).unwrap();
+
+    // motor1.set_speed(0.20);
+    // motor2.set_speed(0.20);
+    info!("speed set");
 
     // Start overcurrent protection
-    spawner.spawn(devices::motors::overcurrent_protection_task(
-        Adc::new(p.ADC2),
-        p.PA0,
-        p.PA1,
-    )).unwrap();
-
-    /*
+    spawner
+        .spawn(devices::motors::overcurrent_protection_task(
+            Adc::new(p.ADC2),
+            p.PA4,
+            p.PB0,
+        ))
+        .unwrap();
 
     // Start Positioning task
-    spawner.spawn(positioning_task()).unwrap();
+    // spawner.spawn(positioning_task()).unwrap();
 
-    /*
-    init_i2c_devices(
-        &mut spawner,
-        p.I2C1,
-        p.PB8,
-        p.PB9,
-        p.DMA1_CH6,
-        p.DMA1_CH0,
-        Irqs,
-        [
-            Output::new(p.PB13, Level::Low, Speed::Low),
-            Output::new(p.PB14, Level::Low, Speed::Low),
-            Output::new(p.PB15, Level::Low, Speed::Low),
-        ],
-        [
-            ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
-            ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
-            ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
-        ],
-    )
-        .await;
-
+    /* init_i2c_devices(
+         &mut spawner,
+         p.I2C1,
+         p.PB8,
+         p.PB9,
+         p.DMA1_CH6,
+         p.DMA1_CH0,
+         Irqs,
+         [
+             Output::new(p.PB7, Level::Low, Speed::Low),
+             Output::new(p.PA2, Level::Low, Speed::Low),
+             Output::new(p.PA3, Level::Low, Speed::Low),
+         ],
+         [
+             ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
+             ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
+             ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
+         ],
+     )
+     .await;*/
     // Start Positioning task
     // spawner.spawn(positioning_task()).unwrap();
 
@@ -210,13 +214,12 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-
-    let buzzer_channel = PwmPin::new(p.PB2, OutputType::PushPull);
+    let buzzer_channel = PwmPin::new(p.PA11, OutputType::PushPull);
 
     spawner
         .spawn(buzzer_task(
             SimplePwm::new(
-                p.TIM2,
+                p.TIM1,
                 None,
                 None,
                 None,
@@ -224,11 +227,9 @@ async fn main(mut spawner: Spawner) {
                 1000.hz(),
                 CountingMode::EdgeAlignedUp,
             ),
-            Ch4,
+            Channel::Ch4,
         ))
         .unwrap();
-
-     */
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);

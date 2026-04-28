@@ -12,8 +12,6 @@ use embedded_hal::i2c::I2c as _;
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l0x::RangeStatus::{PhaseFail, SignalFail};
 use vl53l0x::*;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
 use crate::utils::DurationUtils;
 
 pub static VL53L0X_CHANNEL: Channel<CriticalSectionRawMutex, MeasurementData, 4> = Channel::new();

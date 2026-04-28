@@ -12,7 +12,6 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::Delay;
 use mpu9250::{Error, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice, SpiError};
-use core::cell::Cell;
 use crate::utils::{DurationUtils, HertzUtils};
 
 pub static LATEST_MPU: Mutex<CriticalSectionRawMutex, Cell<Option<MargMeasurements<[f32; 3]>>>> =
@@ -64,8 +63,8 @@ impl Mpu9250Sensor {
         match self.device.all() {
             Ok(data) => {
                 self.last_data = data;
-                trace!("New MPU9250 data: accel={:?}, gyro={:?}, mag={:?}, temp={}", data.accel, data.gyro, data.mag, data.temp);
-                LATEST_MPU.lock(|cell| cell.set(Some(data)));
+                // trace!("New MPU9250 data: accel={:?}, gyro={:?}, mag={:?}, temp={}", data.accel, data.gyro, data.mag, data.temp);
+                LATEST_MPU.lock(|cell| cell.set(Some(data))); 
             }
             Err(e) => defmt::error!("Failed to read sensor data: {}", e),
         }
