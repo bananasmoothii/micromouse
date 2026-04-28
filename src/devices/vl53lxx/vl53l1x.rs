@@ -90,7 +90,7 @@ impl VL53L1XSensor {
 
     /// Saves I2C timing config, applies SWRST to force-clear BSY, then restores config.
     /// Must be called AFTER all XSHUT pins are LOW (sensors release SDA before SWRST).
-    fn i2c_swrst_recovery() {
+    pub fn i2c_swrst_recovery() {
         use embassy_stm32::pac;
 
         // Save timing registers — SWRST resets them to 0
@@ -273,7 +273,7 @@ pub async fn distance_sensor_task(
         }
 
         // try to make i2c not crash
-        // 5.ms_timer().await;
+        5.ms_timer().await;
     }
 }
 

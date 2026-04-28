@@ -23,7 +23,6 @@ pub async fn buzzer_task(
     pwm_channel: embassy_stm32::timer::Channel,
 ) {
     if STARTING_BIP {
-        info!("Playing starting bip...");
         for freq in INIT_MUSIC {
             BUZZER_CHANNEL
                 .send(BuzzerTask {

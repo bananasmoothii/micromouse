@@ -126,26 +126,27 @@ async fn main(mut spawner: Spawner) {
     // Start Positioning task
     // spawner.spawn(positioning_task()).unwrap();
 
-    /* init_i2c_devices(
-         &mut spawner,
-         p.I2C1,
-         p.PB8,
-         p.PB9,
-         p.DMA1_CH6,
-         p.DMA1_CH0,
-         Irqs,
-         [
-             Output::new(p.PB7, Level::Low, Speed::Low),
-             Output::new(p.PA2, Level::Low, Speed::Low),
-             Output::new(p.PA3, Level::Low, Speed::Low),
-         ],
-         [
-             ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
-             ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
-             ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
-         ],
-     )
-     .await;*/
+    init_i2c_devices(
+        &mut spawner,
+        p.I2C1,
+        p.PB8,
+        p.PB9,
+        p.DMA1_CH6,
+        p.DMA1_CH0,
+        Irqs,
+        [
+            Output::new(p.PB7, Level::Low, Speed::Low),
+            Output::new(p.PB2, Level::Low, Speed::Low),
+            Output::new(p.PB12, Level::Low, Speed::Low),
+        ],
+        [
+            ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
+            ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
+            ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
+        ],
+    )
+        .await;
+
     // Start Positioning task
     // spawner.spawn(positioning_task()).unwrap();
 
