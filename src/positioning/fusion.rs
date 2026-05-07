@@ -7,39 +7,68 @@ use core::sync::atomic::Ordering;
 use embassy_time::Instant;
 use micromath::F32Ext;
 
+// Note: this is NOT a proper EKF. A real EKF maintains a full [x, y, θ] state vector with a 3×3
+// covariance matrix and propagates uncertainty through the nonlinear motion model via a Jacobian.
+// What we have instead is two independent scalar Kalman filters (one for θ, one for XY) with the
+// nonlinear rotation (cos/sin of θ) applied ad-hoc. Cross-covariance between θ and XY is ignored.
+// This is simpler to tune and sufficient for a micromouse, but worth knowing if results disappoint.
+
+// --- How a scalar Kalman filter works ---
+// Each filter has one state value and one uncertainty estimate P.
+// Every step:
+//   Predict: state += model_update;  P += Q   (Q = how much uncertainty we add per step)
+//   Update:  K = P / (P + R)                  (K = Kalman gain, 0..1)
+//            state += K * (measurement - state)
+//            P *= (1 - K)
+// When P >> R → K ≈ 1 → trust measurement completely.
+// When P << R → K ≈ 0 → ignore measurement, keep current estimate.
+// Q and R are tuning parameters you set based on how noisy each source is.
+
+// --- Heading (θ) filter ---
+
+/// Process noise from gyro integration: how much heading uncertainty grows per 20 ms step.
+///   MPU9250 gyro noise ≈ 0.01 rad/s (std dev)
+///   variance per step = (0.01 rad/s)² × 0.02 s = 2×10⁻⁶ rad²  (std dev ≈ 0.0014 rad ≈ 0.08°)
+/// We use 1×10⁻⁴ (10× larger) to add margin for temperature drift and bias instability.
+const Q_THETA_GYRO: f32 = 0.0001;
+
+/// Measurement noise when using odometry as a heading source.
+/// In a pure rolling differential drive, odometry heading would be accurate to a few degrees.
+/// With skid-steering, lateral slip in curves adds large errors — easily ±20–40° (0.35–0.70 rad),
+/// so variance ≈ 0.1–0.5 rad². We use 0.5 to keep gyro dominant during turns.
+/// Lower this if odometry heading proves reliable on your surface.
+const R_THETA_ODOM: f32 = 0.5;
+
+/// Measurement noise when using the magnetometer as a heading source.
+/// DC motors generate strong, variable magnetic fields. Expect ±20–40° of noise near them,
+/// which gives variance ≈ 0.1–0.5 rad². We use 1.5 (std dev ≈ ±70°) to be conservative —
+/// if the magnetometer is heavily disturbed, raising this toward 5.0+ is appropriate.
+const R_THETA_MAG: f32 = 1.5;
+
+// --- Position (XY) filter ---
+
+/// Process noise from velocity integration: how much position uncertainty grows per 20 ms step.
+///   speed uncertainty ≈ 5% at 0.5 m/s  →  0.5 × 0.05 = 0.025 m/s error
+///   position error per step = 0.025 m/s × 0.02 s = 0.5 mm
+///   variance = (0.0005 m)² = 2.5×10⁻⁷ m²  (std dev = 0.5 mm per step)
+/// We use 1×10⁻⁴ m² (std dev ≈ 1 cm) to include wheel slip and heading error contributions.
+const Q_XY_VEL: f32 = 0.0001;
+
+/// Measurement noise when using cumulative odometry as a position source.
+/// Wheel encoders are accurate on straights (≈1% distance error), but skid-steering slip
+/// and heading errors accumulate. Over 1 m of travel expect ~1–3 cm of drift → variance ≈ 0.0001–0.001 m².
+/// We use 0.02 m² (std dev ≈ 14 cm) as a conservative starting point — tighten once tested.
+const R_XY_ODOM: f32 = 0.02;
+
 pub struct SensorFusion {
     state: Position2D,
-
-    // Internal trackers to accumulate raw odometry as our absolute position measurement
+    /// Cumulative odometry position in global frame, used as the absolute position measurement.
     odom_global_x: f32,
     odom_global_y: f32,
-
-    /// `p_theta` (Error Covariance): Represents our uncertainty in the current orientation estimate.
-    /// Units: Radians Squared (rad^2).
-    /// It grows during prediction (due to gyro drift) and shrinks when we get a measurement.
-    p_theta: f32,
-
-    /// `q_theta` (Process Noise Covariance): How much uncertainty we add per step because of integration drift.
-    /// Units: Radians Squared (rad^2) per step.
-    /// *Tuning*: Increase if the real gyro drifts heavily. Decrease if you trust the gyro almost perfectly.
-    q_theta: f32,
-
-    /// `r_theta_odom` (Odometry Measurement Noise): Represents the expected noise/slip in wheel odometry.
-    /// Units: Radians Squared (rad^2).
-    /// *Tuning*: Increase if the wheels frequently slip/skid or if the axle track width is imprecise. Decrease if odometry is extremely precise.
-    r_theta_odom: f32,
-
-    /// `r_theta_mag` (Magnetometer Measurement Noise): Magnetic noise is typically high inside a robot with motors.
-    /// Units: Radians Squared (rad^2).
-    /// *Tuning*: Decrease if the compass is electrically isolated and accurate (fixes long-term drift faster). Keep very high (e.g. 10.0+) if motors severely distort the magnetic field.
-    r_theta_mag: f32,
-
-    /// Covariance tracking for our X/Y coordinates
-    p_xy: f32,
-    /// Position process noise per step (uncertainty growth between odometry corrections)
-    q_xy: f32,
-    /// Odometry absolute measurement noise. Lower value means we trust the odometry distance more.
-    r_xy_odom: f32,
+    /// Error covariance for heading: grows with Q_THETA_GYRO each step, shrinks on each measurement.
+    p_theta_gyro: f32,
+    /// Error covariance for XY position: grows with Q_XY_VEL each step, shrinks on each measurement.
+    p_xy_odom: f32,
 }
 
 impl SensorFusion {
@@ -48,94 +77,65 @@ impl SensorFusion {
             state: Position2D::default(),
             odom_global_x: 0.0,
             odom_global_y: 0.0,
-            p_theta: 1.0,
-            q_theta: 0.001,
-            r_theta_odom: 1.5,  // High value → gyro dominates; odometry barely corrects solo-tick noise
-            r_theta_mag: 5.0,   // Slightly more mag trust to compensate for reduced odom correction
-            p_xy: 1.0,
-            q_xy: 0.005,
-            r_xy_odom: 0.2,
+            p_theta_gyro: 1.0, // start uncertain — filter converges within the first few cycles
+            p_xy_odom: 1.0,
         }
     }
 
     pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult) -> Position2D {
-        let dt = mpu.dt;
-        let mpu_delta = mpu.delta;
-        let mag_heading = mpu.relative_mag;
+        // --- Heading Kalman filter ---
 
-        // --- 1D Kalman Filter for Theta ---
+        // Predict: gyro gives us d_theta directly; uncertainty grows by Q_THETA_GYRO
+        self.state.theta += mpu.d_theta;
+        self.p_theta_gyro += Q_THETA_GYRO;
 
-        // 1. Predict (using MPU gyro delta)
-        self.state.theta += mpu_delta.d_theta;
-        self.p_theta += self.q_theta;
-
-        // 2. Update (using Odometry delta) — only once both wheels have seen at least two
-        //    consecutive ticks (interval > 0).  Before that, a solo tick makes d_theta look
-        //    like a ~46° turn even on a perfectly straight run; gyro-only is far more accurate
-        //    during those first few revolutions.
+        // Update from odometry — only once both wheels have seen at least two consecutive ticks
+        // (interval > 0). Before that, a single tick looks like a ~46° turn on a straight line;
+        // gyro-only is far more accurate during those first few revolutions.
         let odom_synced = LEFT_TICK_INTERVAL_US.load(Ordering::Relaxed) > 0
             && RIGHT_TICK_INTERVAL_US.load(Ordering::Relaxed) > 0;
         if odom_synced {
-            let z_odom = odom_delta.d_theta - mpu_delta.d_theta;
-            let k_odom = self.p_theta / (self.p_theta + self.r_theta_odom);
-            self.state.theta += k_odom * z_odom;
-            self.p_theta = (1.0 - k_odom) * self.p_theta;
+            let k_theta_odom = self.p_theta_gyro / (self.p_theta_gyro + R_THETA_ODOM);
+            self.state.theta += k_theta_odom * (odom_delta.d_theta - mpu.d_theta);
+            self.p_theta_gyro *= 1.0 - k_theta_odom;
         }
 
-        // 3. Update (using Magnetometer absolute heading)
-        let mut z_mag = mag_heading - self.state.theta;
-        while z_mag > PI {
-            z_mag -= 2.0 * PI;
-        }
-        while z_mag < -PI {
-            z_mag += 2.0 * PI;
-        }
-        let k_mag = self.p_theta / (self.p_theta + self.r_theta_mag);
-        self.state.theta += k_mag * z_mag;
-        self.p_theta = (1.0 - k_mag) * self.p_theta;
+        // Update from magnetometer (absolute heading — prevents gyro drift from accumulating)
+        let mut z_mag = mpu.relative_mag - self.state.theta;
+        while z_mag > PI { z_mag -= 2.0 * PI; }
+        while z_mag < -PI { z_mag += 2.0 * PI; }
+        let k_theta_mag = self.p_theta_gyro / (self.p_theta_gyro + R_THETA_MAG);
+        self.state.theta += k_theta_mag * z_mag;
+        self.p_theta_gyro *= 1.0 - k_theta_mag;
 
-        // Normalize theta to [-PI, PI]
-        while self.state.theta > PI {
-            self.state.theta -= 2.0 * PI;
-        }
-        while self.state.theta < -PI {
-            self.state.theta += 2.0 * PI;
-        }
+        while self.state.theta > PI { self.state.theta -= 2.0 * PI; }
+        while self.state.theta < -PI { self.state.theta += 2.0 * PI; }
 
         let (sin_theta, cos_theta) = self.state.theta.sin_cos();
 
-        // --- 2D Position Kalman Filter ---
+        // --- Position Kalman filter ---
 
-        // 1. Velocity from per-wheel tick timestamps.
-        //    The effective period = max(elapsed_since_last_tick, last_tick_interval) so velocity
-        //    naturally decreases as the robot slows down without needing another tick to fire.
-        //    This is inherently adaptive: faster → shorter period → responsive;
-        //    slower → longer period → smooth.
+        // Velocity from per-wheel tick timestamps. The effective period =
+        // max(elapsed_since_last_tick, last_tick_interval), so velocity naturally decreases
+        // as the robot slows without needing another tick to fire.
         let now_us = Instant::now().as_micros() as u32;
-        let v_left = left_wheel_velocity(now_us);
-        let v_right = right_wheel_velocity(now_us);
-        let v_center = (v_left + v_right) / 2.0;
+        let v_center = (left_wheel_velocity(now_us) + right_wheel_velocity(now_us)) / 2.0;
         self.state.v_x = v_center * cos_theta;
         self.state.v_y = v_center * sin_theta;
 
-        // 2. Predict position using smoothed velocity
-        self.state.x += self.state.v_x * dt;
-        self.state.y += self.state.v_y * dt;
-        self.p_xy += self.q_xy;
+        // Predict: integrate velocity; uncertainty grows by Q_XY_VEL
+        self.state.x += self.state.v_x * mpu.dt;
+        self.state.y += self.state.v_y * mpu.dt;
+        self.p_xy_odom += Q_XY_VEL;
 
-        // 3. Correct position using cumulative odometry
-        let delta_center = odom_delta.dx;
-        self.odom_global_x += delta_center * cos_theta;
-        self.odom_global_y += delta_center * sin_theta;
+        // Update from cumulative odometry (more stable than velocity over multiple steps)
+        self.odom_global_x += odom_delta.dx * cos_theta;
+        self.odom_global_y += odom_delta.dx * sin_theta;
+        let k_xy_odom = self.p_xy_odom / (self.p_xy_odom + R_XY_ODOM);
+        self.state.x += k_xy_odom * (self.odom_global_x - self.state.x);
+        self.state.y += k_xy_odom * (self.odom_global_y - self.state.y);
+        self.p_xy_odom *= 1.0 - k_xy_odom;
 
-        let z_x = self.odom_global_x - self.state.x;
-        let z_y = self.odom_global_y - self.state.y;
-
-        let k_xy = self.p_xy / (self.p_xy + self.r_xy_odom);
-        self.state.x += k_xy * z_x;
-        self.state.y += k_xy * z_y;
-        self.p_xy = (1.0 - k_xy) * self.p_xy;
-
-        self.state.clone()
+        self.state
     }
 }

@@ -13,8 +13,8 @@ pub mod utils;
 
 use crate::devices::battery::battery_monitoring_task;
 use crate::devices::buzzer::{buzzer_task};
-use crate::devices::hall_sensor_3144::{LEFT_FORWARD, RIGHT_FORWARD, WheelSide, hall_sensor_continuous_measuring};
-use crate::devices::motors::Motor;
+use crate::devices::hall_sensor_3144::hall_sensor_continuous_measuring;
+use crate::devices::motors::{Motor, WheelSide};
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::devices::vl53lxx::vl53l1x::{VL53L1XSensor};
 use crate::positioning::{positioning_task};
@@ -104,8 +104,8 @@ async fn main(mut spawner: Spawner) {
         CountingMode::EdgeAlignedUp,
     );
 
-    let mut motor1 = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1, &LEFT_FORWARD);
-    let mut motor2 = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3, &RIGHT_FORWARD);
+    let mut motor_left = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1, WheelSide::Left);
+    let mut motor_right = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3, WheelSide::Right);
 
     // motor1.set_speed(0.20);
     // motor2.set_speed(0.20);
@@ -122,7 +122,6 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-    spawner.spawn(positioning_task()).unwrap();
     // spawner.spawn(maze_runner_task()).unwrap();
     // spawner.spawn(motor_tests()).unwrap();
     /*
@@ -199,9 +198,7 @@ async fn main(mut spawner: Spawner) {
         }
     };
 
-    imu.start_continuous_measurement(&mut spawner)
-        .await
-        .unwrap();
+    spawner.spawn(positioning_task(imu)).unwrap();
 
     spawner
         .spawn(hall_sensor_continuous_measuring(

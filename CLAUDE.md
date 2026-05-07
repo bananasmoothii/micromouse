@@ -46,7 +46,7 @@ src/
     buzzer.rs          — PWM audio (TIM2), command channel-driven
   positioning/
     mod.rs             — positioning_task: 20 ms sensor-fusion loop
-    odometry.rs        — Differential wheel kinematics (r=0.02 m, L=0.078 m, 2 ticks/rev)
+    odometry.rs        — Skid-steering wheel kinematics (r=0.02 m, L=0.078 m, 12 ticks/rev); wheels slip laterally in curves so odometry heading is less reliable than gyro during turns
     mpu.rs             — Gyro → yaw, magnetometer → absolute heading
     fusion.rs          — Extended Kalman Filter (odometry + gyro + mag)
     types.rs           — Position2D, MovementDelta
