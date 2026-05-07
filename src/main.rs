@@ -12,30 +12,22 @@ mod trajectory;
 pub mod utils;
 
 use crate::devices::battery::battery_monitoring_task;
-use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, buzzer_task};
+use crate::devices::buzzer::{buzzer_task};
 use crate::devices::hall_sensor_3144::{LEFT_FORWARD, RIGHT_FORWARD, WheelSide, hall_sensor_continuous_measuring};
-use crate::devices::motors::{Motor, motor_controller_task};
+use crate::devices::motors::Motor;
 use crate::devices::mpu9250::Mpu9250Sensor;
-use crate::devices::vl53lxx::MeasurementData;
-use crate::devices::vl53lxx::vl53l1x::{VL53L1X_MIDDLE_CHANNEL, VL53L1XSensor};
-use crate::dimensions::LAB_CELL;
-use crate::i2c_devices::init_i2c_devices;
-use crate::labyrinth::Labyrinth;
-use crate::positioning::{CURRENT_STATE, positioning_task};
-use crate::trajectory::{Segment, SmoothCornerOptimizer, Trajectory, TrajectoryOptimizer, VelocityProfileOptimizer};
+use crate::devices::vl53lxx::vl53l1x::{VL53L1XSensor};
+use crate::positioning::{positioning_task};
 use crate::utils::{DurationUtils, HertzUtils};
 use alloc::boxed::Box;
-use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::Cell;
-use core::f32::consts::PI;
 use defmt::*;
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::{self, ExtiInput};
 use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
-use embassy_stm32::peripherals::{I2C1, TIM3};
+use embassy_stm32::peripherals::{I2C1};
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel;
@@ -43,10 +35,7 @@ use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
-use embassy_time::{Duration, Timer};
 use embedded_alloc::LlffHeap as Heap;
-use micromath::F32Ext;
-use crate::trajectory::config::{MAX_ACCELERATION, MAX_SPEED};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -128,15 +117,14 @@ async fn main(mut spawner: Spawner) {
             Adc::new(p.ADC2),
             p.PA4,
             p.PB0,
+            p.PA0,
+            p.PA1,
         ))
         .unwrap();
 
     spawner.spawn(positioning_task()).unwrap();
-    spawner
-        .spawn(motor_controller_task(motor1, motor2))
-        .unwrap();
     // spawner.spawn(maze_runner_task()).unwrap();
-    spawner.spawn(motor_tests()).unwrap();
+    // spawner.spawn(motor_tests()).unwrap();
     /*
         init_i2c_devices(
             &mut spawner,
@@ -269,7 +257,7 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
     }
 }
 
-#[embassy_executor::task]
+/*#[embassy_executor::task]
 async fn motor_tests() {
     2.s_timer().await;
     // TODO: If the segment is supposed to be 1.0 meter, why does it alwyas stop at approx. 1.35 meter ? 80.555053 [INFO ] Position: x: 1.35 y: 0.03 theta: 3.8° v_x: 0.00 v_y: 0.00,  left ticks: 25, right ticks: 22 (test src/positioning/mod.rs:65)
@@ -281,8 +269,9 @@ async fn motor_tests() {
         acceleration: MAX_ACCELERATION,
     }]);
     trajectory.execute().await;
-}
+}*/
 
+/*
 /// Imaginary-maze test: executes cell-by-cell, updating wall knowledge from the
 /// forward ToF sensor after each step so the path adapts when walls appear/disappear.
 #[embassy_executor::task]
@@ -370,7 +359,8 @@ async fn maze_runner_task() -> ! {
         traj.execute().await;
     }
 }
-
+*/
+/*
 fn poc_trajectory_svg() {
     use crate::labyrinth::Labyrinth;
     use crate::trajectory::{
@@ -426,3 +416,4 @@ fn poc_trajectory_svg() {
         cortex_m::asm::wfi();
     }
 }
+*/

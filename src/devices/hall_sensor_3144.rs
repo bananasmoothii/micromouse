@@ -31,26 +31,36 @@ pub async fn hall_sensor_continuous_measuring(mut pin: ExtiInput<'static>, side:
     loop {
         pin.wait_for_rising_edge().await;
         let now_us = Instant::now().as_micros() as u32;
+        let (forward_channel, ticks_total, last_tick_us, tick_interval_us) = match side {
+            WheelSide::Left => (
+                &LEFT_FORWARD,
+                &LEFT_TICKS_TOTAL,
+                &LEFT_LAST_TICK_US,
+                &LEFT_TICK_INTERVAL_US,
+            ),
+            WheelSide::Right => (
+                &RIGHT_FORWARD,
+                &RIGHT_TICKS_TOTAL,
+                &RIGHT_LAST_TICK_US,
+                &RIGHT_TICK_INTERVAL_US,
+            ),
+        };
+
+        let delta = if forward_channel.load(Ordering::Relaxed) { 1 } else { -1 };
+        ticks_total.fetch_add(delta, Ordering::Relaxed);
+        let prev = last_tick_us.swap(now_us, Ordering::Relaxed);
+        if prev != 0 {
+            tick_interval_us.store(now_us.wrapping_sub(prev), Ordering::Relaxed);
+        }
+
         match side {
             WheelSide::Left => {
-                let delta = if LEFT_FORWARD.load(Ordering::Relaxed) { 1 } else { -1 };
-                LEFT_TICKS_TOTAL.fetch_add(delta, Ordering::Relaxed);
-                let prev = LEFT_LAST_TICK_US.swap(now_us, Ordering::Relaxed);
-                if prev != 0 {
-                    LEFT_TICK_INTERVAL_US.store(now_us.wrapping_sub(prev), Ordering::Relaxed);
-                }
                 let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
                     freq: 1000.hz(),
                     duration: 20.ms(),
                 });
             }
             WheelSide::Right => {
-                let delta = if RIGHT_FORWARD.load(Ordering::Relaxed) { 1 } else { -1 };
-                RIGHT_TICKS_TOTAL.fetch_add(delta, Ordering::Relaxed);
-                let prev = RIGHT_LAST_TICK_US.swap(now_us, Ordering::Relaxed);
-                if prev != 0 {
-                    RIGHT_TICK_INTERVAL_US.store(now_us.wrapping_sub(prev), Ordering::Relaxed);
-                }
                 let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
                     freq: 1500.hz(),
                     duration: 20.ms(),
