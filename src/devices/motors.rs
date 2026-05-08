@@ -1,11 +1,11 @@
+use crate::utils::DurationUtils;
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::error;
 use embassy_stm32::adc::{Adc, SampleTime};
-use embassy_stm32::{peripherals, Peri};
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
-use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
 use embassy_stm32::timer::simple_pwm::SimplePwm;
-use crate::utils::DurationUtils;
+use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
+use embassy_stm32::{Peri, peripherals};
 
 pub static LEFT_FORWARD: AtomicBool = AtomicBool::new(true);
 pub static RIGHT_FORWARD: AtomicBool = AtomicBool::new(true);
@@ -14,6 +14,11 @@ pub enum WheelSide {
     Left,
     Right,
 }
+
+const LEFT_WHEEL_SPEED_FACTOR: f32 = 1.0;
+const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.08;
+
+const PWM_TO_SPEED_FACTOR: f32 = 20.0;
 
 pub struct Motor<'d, T: GeneralInstance4Channel> {
     in_a: Output<'d>,
@@ -33,26 +38,34 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
     ) -> Self {
         let in_a = Output::new(in_a_pin, Level::Low, Speed::Medium);
         let in_b = Output::new(in_b_pin, Level::Low, Speed::Medium);
-        Self { in_a, in_b, pwm, pwm_channel, side }
+        Self {
+            in_a,
+            in_b,
+            pwm,
+            pwm_channel,
+            side,
+        }
     }
 
-    pub fn set_speed(&mut self, speed: f32) {
+    /// duty_cycle should be [-1.0, 1.0], -1.0 being max speed backwards and 1.0 being max speed
+    /// forwards. 0.0 will call [Motor::brake].
+    pub fn set_pwm(&mut self, duty_cycle: f32) {
         assert!(
-            -1.0 <= speed && speed <= 1.0,
+            -1.0 <= duty_cycle && duty_cycle <= 1.0,
             "Speed must be between -1.0 and 1.0"
         );
 
-        if speed == 0.0 {
+        if duty_cycle == 0.0 {
             self.brake();
             return;
         }
 
-        let forward_flag = match self.side {
-            WheelSide::Left => &LEFT_FORWARD,
-            WheelSide::Right => &RIGHT_FORWARD,
+        let (actual_speed, forward_flag) = match self.side {
+            WheelSide::Left => (duty_cycle * LEFT_WHEEL_SPEED_FACTOR, &LEFT_FORWARD),
+            WheelSide::Right => (duty_cycle * RIGHT_WHEEL_SPEED_FACTOR, &RIGHT_FORWARD),
         };
 
-        if speed > 0.0 {
+        if actual_speed >= 0.0 {
             forward_flag.store(true, Ordering::Relaxed);
             self.in_a.set_high();
             self.in_b.set_low();
@@ -62,12 +75,17 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
             self.in_b.set_high();
         }
 
-        let duty = (self.pwm.max_duty_cycle() as f32 * speed) as u32;
+        let duty = (self.pwm.max_duty_cycle() as f32 * actual_speed) as u32;
         let mut pwm_channel = self.pwm.channel(self.pwm_channel);
         pwm_channel.set_duty_cycle(duty);
         if !pwm_channel.is_enabled() {
             pwm_channel.enable();
         }
+    }
+
+    /// Set speed in m/s. Can be negative or 0.0
+    pub fn set_speed(&mut self, speed_m_s: f32) {
+        self.set_pwm(speed_m_s / PWM_TO_SPEED_FACTOR)
     }
 
     pub fn brake(&mut self) {
@@ -107,20 +125,27 @@ pub async fn overcurrent_protection_task(
         let mut max_raw1 = 0;
         for _ in 0..20 {
             let raw = adc_module.blocking_read(&mut sense_motor1, SampleTime::CYCLES84);
-            if raw > max_raw1 { max_raw1 = raw; }
+            if raw > max_raw1 {
+                max_raw1 = raw;
+            }
         }
 
         let mut max_raw2 = 0;
         for _ in 0..20 {
             let raw = adc_module.blocking_read(&mut sense_motor2, SampleTime::CYCLES84);
-            if raw > max_raw2 { max_raw2 = raw; }
+            if raw > max_raw2 {
+                max_raw2 = raw;
+            }
         }
 
         let current_amps1 = (max_raw1 as f32 / ADC_MAX) * V_REF / R_SENSE * K;
         let current_amps2 = (max_raw2 as f32 / ADC_MAX) * V_REF / R_SENSE * K;
 
         if current_amps1 > 4.0 || current_amps2 > 4.0 {
-            error!("Overcurrent ! M1: {} A, M2: {} A", current_amps1, current_amps2);
+            error!(
+                "Overcurrent ! M1: {} A, M2: {} A",
+                current_amps1, current_amps2
+            );
             enable1.set_low();
             enable2.set_low();
             5.s_timer().await;

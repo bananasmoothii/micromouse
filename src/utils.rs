@@ -1,5 +1,9 @@
+use core::cell::Cell;
 use embassy_stm32::time::Hertz;
+use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex};
 use embassy_time::{Duration, Timer};
+use crate::positioning::types::PositionState;
 
 pub trait DurationUtils {
     fn us(self) -> Duration;
@@ -75,5 +79,33 @@ impl HertzUtils for u32 {
     #[inline]
     fn mhz(self) -> Hertz {
         Hertz::mhz(self)
+    }
+}
+
+pub trait CellMutexUtils<T> {
+    fn get(&self) -> T;
+    fn set(&self, value: T);
+}
+
+impl<T: Copy, RM: RawMutex> CellMutexUtils<T> for Mutex<RM, Cell<T>> {
+    #[inline]
+    fn get(&self) -> T {
+        self.lock(Cell::get)
+    }
+
+    #[inline]
+    fn set(&self, value: T) {
+        self.lock(|cell| cell.set(value));
+    }
+}
+
+pub trait MathUtils {
+    fn square(&self) -> Self;
+}
+
+impl MathUtils for f32 {
+    #[inline]
+    fn square(&self) -> f32 {
+        self * self
     }
 }
