@@ -27,7 +27,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::{self, ExtiInput};
 use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
-use embassy_stm32::peripherals::{I2C1};
+use embassy_stm32::peripherals::{I2C1, TIM1, TIM2, TIM3};
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel;
@@ -36,6 +36,8 @@ use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
 use embedded_alloc::LlffHeap as Heap;
+use crate::trajectory::straight_line::StraightLine;
+use crate::trajectory::TrajectorySegment;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -123,7 +125,7 @@ async fn main(mut spawner: Spawner) {
         .unwrap();
 
     // spawner.spawn(maze_runner_task()).unwrap();
-    // spawner.spawn(motor_tests()).unwrap();
+    spawner.spawn(motor_tests(motor_left, motor_right)).unwrap();
     /*
         init_i2c_devices(
             &mut spawner,
@@ -254,19 +256,15 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
     }
 }
 
-/*#[embassy_executor::task]
-async fn motor_tests() {
+#[embassy_executor::task]
+async fn motor_tests(mut motor_left: Motor<'static, TIM3>, mut motor_right: Motor<'static, TIM2>) {
     2.s_timer().await;
-    // TODO: If the segment is supposed to be 1.0 meter, why does it alwyas stop at approx. 1.35 meter ? 80.555053 [INFO ] Position: x: 1.35 y: 0.03 theta: 3.8° v_x: 0.00 v_y: 0.00,  left ticks: 25, right ticks: 22 (test src/positioning/mod.rs:65)
-    let trajectory = Trajectory::new(vec![Segment::Straight {
+    let trajectory = StraightLine {
         distance: 1.0,
-        max_speed: MAX_SPEED,
-        entry_speed: 0.0,
-        exit_speed: 0.0,
-        acceleration: MAX_ACCELERATION,
-    }]);
-    trajectory.execute().await;
-}*/
+        out_speed: 0.0,
+    };
+    trajectory.execute(&mut motor_left, &mut motor_right, Some(0.2)).await;
+}
 
 /*
 /// Imaginary-maze test: executes cell-by-cell, updating wall knowledge from the

@@ -42,7 +42,7 @@ pub async fn positioning_task(mpu: &'static mut Mpu9250Sensor) {
         };
 
         let state = fusion_proc.update(odom_delta, mpu_result);
-        info!("Position: {}", state);
+        // info!("Position: {}", state);
         CURRENT_POS.set(state);
 
         20.ms_timer().await;
