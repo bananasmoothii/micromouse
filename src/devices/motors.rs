@@ -1,11 +1,13 @@
 use crate::utils::DurationUtils;
 use core::sync::atomic::{AtomicBool, Ordering};
-use defmt::error;
+use core::sync::atomic::Ordering::Relaxed;
+use defmt::{error, trace};
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
 use embassy_stm32::{Peri, peripherals};
+use crate::devices::battery::BATTERY_VOLTAGE_MV;
 
 pub static LEFT_FORWARD: AtomicBool = AtomicBool::new(true);
 pub static RIGHT_FORWARD: AtomicBool = AtomicBool::new(true);
@@ -15,10 +17,15 @@ pub enum WheelSide {
     Right,
 }
 
-const LEFT_WHEEL_SPEED_FACTOR: f32 = 1.0;
-const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.08;
+const LEFT_WHEEL_SPEED_FACTOR: f32 = 0.95;
+const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.05;
 
-const PWM_TO_SPEED_FACTOR: f32 = 20.0;
+/// PWM duty cycle → m/s, measured at CALIBRATION_VOLTAGE.
+const PWM_TO_SPEED_FACTOR: f32 = 4.15;
+/// Battery voltage (V) at which PWM_TO_SPEED_FACTOR was measured.
+const CALIBRATION_VOLTAGE: f32 = 8.3;
+
+const MIN_USABLE_PWM: f32 = 0.095;
 
 pub struct Motor<'d, T: GeneralInstance4Channel> {
     in_a: Output<'d>,
@@ -49,7 +56,7 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
 
     /// duty_cycle should be [-1.0, 1.0], -1.0 being max speed backwards and 1.0 being max speed
     /// forwards. 0.0 will call [Motor::brake].
-    pub fn set_pwm(&mut self, duty_cycle: f32) {
+    pub fn set_pwm(&mut self, mut duty_cycle: f32) {
         assert!(
             -1.0 <= duty_cycle && duty_cycle <= 1.0,
             "Speed must be between -1.0 and 1.0"
@@ -59,6 +66,9 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
             self.brake();
             return;
         }
+        if duty_cycle.abs() < MIN_USABLE_PWM {
+            duty_cycle = if duty_cycle > 0.0 { MIN_USABLE_PWM } else { -MIN_USABLE_PWM };
+        }
 
         let (actual_speed, forward_flag) = match self.side {
             WheelSide::Left => (duty_cycle * LEFT_WHEEL_SPEED_FACTOR, &LEFT_FORWARD),
@@ -66,11 +76,11 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
         };
 
         if actual_speed >= 0.0 {
-            forward_flag.store(true, Ordering::Relaxed);
+            forward_flag.store(true, Relaxed);
             self.in_a.set_high();
             self.in_b.set_low();
         } else {
-            forward_flag.store(false, Ordering::Relaxed);
+            forward_flag.store(false, Relaxed);
             self.in_a.set_low();
             self.in_b.set_high();
         }
@@ -85,7 +95,9 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
 
     /// Set speed in m/s. Can be negative or 0.0
     pub fn set_speed(&mut self, speed_m_s: f32) {
-        self.set_pwm(speed_m_s / PWM_TO_SPEED_FACTOR)
+        let voltage = BATTERY_VOLTAGE_MV.load(Relaxed) as f32 / 1000.0;
+        let factor = PWM_TO_SPEED_FACTOR * voltage / CALIBRATION_VOLTAGE;
+        self.set_pwm(speed_m_s / factor)
     }
 
     pub fn brake(&mut self) {

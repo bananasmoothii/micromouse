@@ -3,18 +3,18 @@ use crate::positioning::CURRENT_POS;
 use crate::trajectory::{TrajectorySegment, UPDATE_INTERVAL_MS};
 use crate::utils::{CellMutexUtils, DurationUtils, MathUtils};
 use alloc::format;
-use core::sync::atomic::{AtomicI32, AtomicU32};
 use core::sync::atomic::Ordering::Relaxed;
+use core::sync::atomic::{AtomicI32, AtomicU32};
 use defmt::{debug, trace};
 use embassy_stm32::peripherals::{TIM1, TIM2, TIM3};
+use micromath::F32Ext;
 
-const MAX_SPEED_M_S: f32 = 0.5;
-const ACCELERATION_M_S2: f32 = 0.5; // and deceleration
+const MAX_SPEED_M_S: f32 = 1.0;
 
 // PI controller parameters — tune empirically on hardware
 // Start with KI=0, raise KP until slight oscillation, back off ~30%, then add KI.
-const KP: f32 = 1.0;  // (m/s output) / (m/s error) — dimensionless
-const KI: f32 = 0.04; // per tick; keep KI * typical_error << MAX_I
+const KP: f32 = 0.5; // (m/s output) / (m/s error) — dimensionless
+const KI: f32 = 0.02; // per tick; keep KI * typical_error << MAX_I
 
 /// P correction capped at X m/s per tick
 const MAX_P: f32 = 0.2;
@@ -29,43 +29,44 @@ pub struct StraightLine {
     pub out_speed: f32,
 }
 
-static LAST_INTEGRAL: AtomicU32 = AtomicU32::new(0f32.to_bits());
-
 impl TrajectorySegment for StraightLine {
-    async fn execute(&self, motor_left: &mut Motor<'_, TIM3>, motor_right: &mut Motor<'_, TIM2>, override_start_speed: Option<f32>) {
+    async fn execute<'a>(
+        &self,
+        motor_left: &mut Motor<'a, TIM3>,
+        motor_right: &mut Motor<'a, TIM2>,
+        override_start_speed: Option<f32>,
+    ) {
+        let mut motors = Motors {
+            motor_left,
+            motor_right,
+        };
+
         let start_pos = CURRENT_POS.get();
-        let start_speed = override_start_speed.unwrap_or(start_pos.v_forward);
+        let start_speed = override_start_speed
+            .unwrap_or(start_pos.v_forward)
+            .clamp(-MAX_SPEED_M_S, MAX_SPEED_M_S);
 
-        // also for deceleration
-        let max_accel_time = (MAX_SPEED_M_S - start_speed) / ACCELERATION_M_S2;
-        // basic integration
-        let max_accel_distance = ACCELERATION_M_S2 / 2.0 * max_accel_time.square()
-            + start_speed * max_accel_time;
+        // Effective deceleration the PI can sustain: max correction per tick × tick rate.
+        // Tuning MAX_P or MAX_I automatically adjusts the braking distance.
+        let effective_decel_m_s2: f32 = (MAX_P + MAX_I) / (UPDATE_INTERVAL_MS as f32 / 1000.0);
 
-        let max_decel_time = (MAX_SPEED_M_S - self.out_speed) / ACCELERATION_M_S2;
-        let max_decel_distance =
-            ACCELERATION_M_S2 / 2.0 * max_decel_time.square() + self.out_speed * max_decel_time;
-
-        let accel_distance = if max_accel_distance + max_decel_distance <= self.distance {
-            max_accel_distance
+        // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
+        let decel_distance_full_speed =
+            (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * effective_decel_m_s2);
+        let (max_reachable_speed, decel_distance) = if decel_distance_full_speed <= self.distance {
+            (MAX_SPEED_M_S, decel_distance_full_speed)
         } else {
-            // see straigh_line_math.md
-            self.distance / 2.0
-                + (self.out_speed.square() - start_speed.square())
-                / (4.0 * ACCELERATION_M_S2)
-        };
-        let decel_start_distance = if max_accel_distance + max_decel_distance <= self.distance {
-            self.distance - max_decel_distance
-        } else {
-            accel_distance
+            // v_max² = 2aΔx + v_final²    (with Δx = self.distance)
+            (
+                (2.0 * effective_decel_m_s2 * self.distance + self.out_speed.square()).sqrt(),
+                self.distance,
+            )
         };
 
-        let v_change_per_tick = ACCELERATION_M_S2 * UPDATE_INTERVAL_MS as f32 / 1000.0;
+        let mut target_speed = max_reachable_speed;
+        let mut commanded_speed = start_speed;
+        let mut integral = 0.0f32;
 
-        let mut integral = f32::from_bits(LAST_INTEGRAL.load(Relaxed));
-
-        let mut target_speed = start_speed;
-        let mut i = 0u32;
         loop {
             let current_pos = CURRENT_POS.get();
             let distance = current_pos.distance_from(&start_pos);
@@ -75,54 +76,42 @@ impl TrajectorySegment for StraightLine {
             }
 
             // update target speed
-            let mut speed_set = true;
-            if distance < accel_distance {
-                trace!("A");
-                target_speed += v_change_per_tick;
-            } else if distance >= decel_start_distance {
-                target_speed -= v_change_per_tick;
-            } else {
-                speed_set = false;
+            if distance >= self.distance - decel_distance {
+                target_speed = self.out_speed;
             }
-
             let speed_error = target_speed - current_pos.v_forward;
 
-            if speed_error.abs() >= 0.04 && i >= 3 {
-                // Use PI control
-                let proportional = (KP * speed_error).clamp(-MAX_P, MAX_P);
-                integral += KI * speed_error;
-                integral = integral.clamp(-MAX_I, MAX_I);
-                let new_speed = target_speed + proportional + integral;
-                debug!(
-                    "StraightLine {} ({}-{}/{}m): PI control: target_speed: {} m/s, current_speed: {} m/s, error: {} m/s, new_speed: {} m/s, P: {} m/s, I: {} m/s",
-                    i,
-                    format!("{:.2}", distance).as_str(),
-                    format!("{:.2}", accel_distance).as_str(),
-                    format!("{:.2}", self.distance).as_str(),
-                    format!("{:.2}", target_speed).as_str(),
-                    format!("{:.2}", current_pos.v_forward).as_str(),
-                    format!("{:.2}", speed_error).as_str(),
-                    format!("{:.2}", new_speed).as_str(),
-                    format!("{:.4}", proportional).as_str(),
-                    format!("{:.4}", integral).as_str()
-                );
+            let proportional = (KP * speed_error).clamp(-MAX_P, MAX_P);
+            integral = (integral + KI * speed_error).clamp(-MAX_I, MAX_I);
+            commanded_speed = (commanded_speed + proportional + integral);
+            // .clamp(-max_reachable_speed, max_reachable_speed);
+            debug!(
+                "StraightLine ({}/{}m): target_speed: {} m/s, current_speed: {} m/s, error: {} m/s, commanded_speed: {} m/s, P: {} m/s, I: {} m/s",
+                format!("{:.2}", distance).as_str(),
+                format!("{:.2}", self.distance).as_str(),
+                format!("{:.2}", target_speed).as_str(),
+                format!("{:.2}", current_pos.v_forward).as_str(),
+                format!("{:.2}", speed_error).as_str(),
+                format!("{:.2}", commanded_speed).as_str(),
+                format!("{:.4}", proportional).as_str(),
+                format!("{:.4}", integral).as_str(),
+            );
 
-                motor_left.set_speed(new_speed);
-                motor_right.set_speed(new_speed);
-            } else if speed_set {
-                // use standard feedforward - more reactive
-                debug!(
-                    "StraightLine {}: standard feedforward: target_speed: {} m/s",
-                    i,
-                    format!("{:.2}", target_speed).as_str()
-                );
-                motor_left.set_speed(target_speed);
-                motor_right.set_speed(target_speed);
-            }
+            motors.set_speed(commanded_speed);
 
             UPDATE_INTERVAL_MS.ms_timer().await;
-            i += 1;
         }
-        LAST_INTEGRAL.store(integral.to_bits(), Relaxed);
+    }
+}
+
+struct Motors<'r, 'd> {
+    motor_left: &'r mut Motor<'d, TIM3>,
+    motor_right: &'r mut Motor<'d, TIM2>,
+}
+
+impl Motors<'_, '_> {
+    fn set_speed(&mut self, speed: f32) {
+        self.motor_left.set_speed(speed);
+        self.motor_right.set_speed(speed);
     }
 }

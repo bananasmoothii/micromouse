@@ -36,6 +36,8 @@ use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
 use embedded_alloc::LlffHeap as Heap;
+use crate::positioning::odometry::{left_wheel_velocity, right_wheel_velocity};
+use embassy_time::Instant;
 use crate::trajectory::straight_line::StraightLine;
 use crate::trajectory::TrajectorySegment;
 
@@ -124,8 +126,6 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-    // spawner.spawn(maze_runner_task()).unwrap();
-    spawner.spawn(motor_tests(motor_left, motor_right)).unwrap();
     /*
         init_i2c_devices(
             &mut spawner,
@@ -233,6 +233,9 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
+
+    spawner.spawn(motor_tests(motor_left, motor_right)).unwrap();
+
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
 
@@ -263,7 +266,45 @@ async fn motor_tests(mut motor_left: Motor<'static, TIM3>, mut motor_right: Moto
         distance: 1.0,
         out_speed: 0.0,
     };
-    trajectory.execute(&mut motor_left, &mut motor_right, Some(2.3)).await;
+    trajectory.execute(&mut motor_left, &mut motor_right, Some(0.41)).await;
+
+    /*    const TEST_PWM: f32 = 0.2;
+
+    2.s_timer().await;
+    info!("PWM calibration: starting at PWM={}", TEST_PWM);
+
+    motor_left.set_pwm(TEST_PWM);
+    motor_right.set_pwm(TEST_PWM);
+
+    // Wait for spin-up before sampling
+    1.s_timer().await;
+
+    // Sample instantaneous velocity (derived from tick intervals, not tick totals)
+    // 40 samples × 50 ms = 2 s window; positioning_task drains tick totals every 20 ms
+    // but never touches the interval atomics, so this approach is drain-safe.
+    let mut left_sum = 0.0f32;
+    let mut right_sum = 0.0f32;
+    for _ in 0..40u32 {
+        let now_us = Instant::now().as_micros() as u32;
+        left_sum += left_wheel_velocity(now_us).abs();
+        right_sum += right_wheel_velocity(now_us).abs();
+        50.ms_timer().await;
+    }
+
+    motor_left.brake();
+    motor_right.brake();
+
+    let left_speed = left_sum / 40.0;
+    let right_speed = right_sum / 40.0;
+
+    info!("Speed — left: {} m/s, right: {} m/s", left_speed, right_speed);
+    info!(
+        "PWM_TO_SPEED_FACTOR — left: {}, right: {}, avg: {}",
+        left_speed / TEST_PWM,
+        right_speed / TEST_PWM,
+        (left_speed + right_speed) / 2.0 / TEST_PWM,
+    );
+*/
 }
 
 /*

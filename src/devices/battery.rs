@@ -2,10 +2,14 @@ use micromath::F32Ext;
 use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, INIT_MUSIC};
 use crate::utils::{DurationUtils, HertzUtils};
 use alloc::format;
+use core::sync::atomic::{AtomicU32, Ordering};
 use defmt::info;
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::{Peri, peripherals};
+
+/// Current battery voltage in millivolts, updated by battery_monitoring_task.
+pub static BATTERY_VOLTAGE_MV: AtomicU32 = AtomicU32::new(0);
 
 // change types if needed, again this is because of embassy task not allowing generics
 #[embassy_executor::task]
@@ -51,7 +55,9 @@ pub async fn battery_monitoring_task(
                 format!("{:.1}", battery_voltage2).as_str()
             );
 
-            let pct = battery_percent(battery_voltage1 + battery_voltage2);
+            let total_voltage = battery_voltage1 + battery_voltage2;
+            BATTERY_VOLTAGE_MV.store((total_voltage * 1000.0) as u32, Ordering::Relaxed);
+            let pct = battery_percent(total_voltage);
             update_leds(&mut leds, pct);
             if (0.5 < battery_voltage1 && battery_voltage1 <= 3.3) || (0.5 < battery_voltage2 && battery_voltage2 <= 3.3) {
                 shutdown(&mut en_pin);
@@ -73,6 +79,7 @@ pub async fn battery_monitoring_task(
                 format!("{:.1}", battery_voltage / 2.0).as_str(),
             );
 
+            BATTERY_VOLTAGE_MV.store((battery_voltage * 1000.0) as u32, Ordering::Relaxed);
             let pct = battery_percent(battery_voltage);
             update_leds(&mut leds, pct);
             if 1.0 < battery_voltage && battery_voltage <= 7.1 {
