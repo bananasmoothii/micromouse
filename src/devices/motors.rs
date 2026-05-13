@@ -17,8 +17,8 @@ pub enum WheelSide {
     Right,
 }
 
-const LEFT_WHEEL_SPEED_FACTOR: f32 = 0.95;
-const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.05;
+const LEFT_WHEEL_SPEED_FACTOR: f32 = 0.98;
+const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.02;
 
 /// PWM duty cycle → m/s, measured at CALIBRATION_VOLTAGE.
 const PWM_TO_SPEED_FACTOR: f32 = 4.15;

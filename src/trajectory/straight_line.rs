@@ -1,25 +1,27 @@
+use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask};
 use crate::devices::motors::Motor;
 use crate::positioning::CURRENT_POS;
 use crate::trajectory::{TrajectorySegment, UPDATE_INTERVAL_MS};
-use crate::utils::{CellMutexUtils, DurationUtils, MathUtils};
+use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils, MathUtils};
 use alloc::format;
 use core::sync::atomic::Ordering::Relaxed;
 use core::sync::atomic::{AtomicI32, AtomicU32};
 use defmt::{debug, trace};
 use embassy_stm32::peripherals::{TIM1, TIM2, TIM3};
+use futures_util::future::err;
 use micromath::F32Ext;
 
-const MAX_SPEED_M_S: f32 = 1.0;
+const MAX_SPEED_M_S: f32 = 0.5;
 
 // PI controller parameters — tune empirically on hardware
 // Start with KI=0, raise KP until slight oscillation, back off ~30%, then add KI.
-const KP: f32 = 0.5; // (m/s output) / (m/s error) — dimensionless
-const KI: f32 = 0.02; // per tick; keep KI * typical_error << MAX_I
+const KP: f32 = 0.05; // (m/s output) / (m/s error) — dimensionless
+const KI: f32 = 0.00; // per tick; keep KI * typical_error << MAX_I
 
 /// P correction capped at X m/s per tick
-const MAX_P: f32 = 0.2;
+const MAX_P: f32 = 0.1;
 /// I correction (integral anti-windup)
-const MAX_I: f32 = 0.1;
+const MAX_I: f32 = 0.05;
 
 /// Accelerates to max speed, maintains it, then decelerates.
 /// This results in a trapezoidal speed profile.
@@ -98,6 +100,13 @@ impl TrajectorySegment for StraightLine {
             );
 
             motors.set_speed(commanded_speed);
+
+            if speed_error < 0.0 {
+                let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
+                    freq: (((speed_error + 1.5) * 500.0) as u32).hz(),
+                    duration: 10.ms(),
+                });
+            }
 
             UPDATE_INTERVAL_MS.ms_timer().await;
         }
