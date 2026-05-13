@@ -41,12 +41,13 @@ pub async fn hall_sensor_continuous_measuring(mut pin: ExtiInput<'static>, side:
             tick_interval_us.store(now_us.wrapping_sub(prev), Ordering::Relaxed);
         }
 
-        let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
-            freq: match side {
-                WheelSide::Left => 1000.hz(),
-                WheelSide::Right => 1500.hz()
-            },
-            duration: 20.ms(),
-        });
+        /*        let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
+                    freq: match side {
+                        WheelSide::Left => 1000.hz(),
+                        WheelSide::Right => 1500.hz()
+                    },
+                    duration: 20.ms(),
+                });
+        */
     }
 }

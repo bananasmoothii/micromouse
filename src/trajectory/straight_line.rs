@@ -5,7 +5,7 @@ use crate::utils::{CellMutexUtils, DurationUtils, MathUtils};
 use alloc::format;
 use core::sync::atomic::{AtomicI32, AtomicU32};
 use core::sync::atomic::Ordering::Relaxed;
-use defmt::debug;
+use defmt::{debug, trace};
 use embassy_stm32::peripherals::{TIM1, TIM2, TIM3};
 
 const MAX_SPEED_M_S: f32 = 0.5;
@@ -13,13 +13,13 @@ const ACCELERATION_M_S2: f32 = 0.5; // and deceleration
 
 // PI controller parameters — tune empirically on hardware
 // Start with KI=0, raise KP until slight oscillation, back off ~30%, then add KI.
-const KP: f32 = 0.5;  // (m/s output) / (m/s error) — dimensionless
-const KI: f32 = 0.02; // per tick; keep KI * typical_error << MAX_I
+const KP: f32 = 1.0;  // (m/s output) / (m/s error) — dimensionless
+const KI: f32 = 0.04; // per tick; keep KI * typical_error << MAX_I
 
-/// P correction capped at ±0.1 m/s per tick
-const MAX_P: f32 = 0.1;
-/// I correction capped at ±0.05 m/s (integral anti-windup)
-const MAX_I: f32 = 0.05;
+/// P correction capped at X m/s per tick
+const MAX_P: f32 = 0.2;
+/// I correction (integral anti-windup)
+const MAX_I: f32 = 0.1;
 
 /// Accelerates to max speed, maintains it, then decelerates.
 /// This results in a trapezoidal speed profile.
@@ -64,7 +64,7 @@ impl TrajectorySegment for StraightLine {
 
         let mut integral = f32::from_bits(LAST_INTEGRAL.load(Relaxed));
 
-        let mut target_speed = start_pos.v_forward;
+        let mut target_speed = start_speed;
         let mut i = 0u32;
         loop {
             let current_pos = CURRENT_POS.get();
@@ -77,6 +77,7 @@ impl TrajectorySegment for StraightLine {
             // update target speed
             let mut speed_set = true;
             if distance < accel_distance {
+                trace!("A");
                 target_speed += v_change_per_tick;
             } else if distance >= decel_start_distance {
                 target_speed -= v_change_per_tick;
@@ -93,13 +94,17 @@ impl TrajectorySegment for StraightLine {
                 integral = integral.clamp(-MAX_I, MAX_I);
                 let new_speed = target_speed + proportional + integral;
                 debug!(
-                    "StraightLine: PI control: target_speed: {} m/s, current_speed: {} m/s, error: {} m/s, new_speed: {} m/s, P: {} m/s, I: {} m/s",
+                    "StraightLine {} ({}-{}/{}m): PI control: target_speed: {} m/s, current_speed: {} m/s, error: {} m/s, new_speed: {} m/s, P: {} m/s, I: {} m/s",
+                    i,
+                    format!("{:.2}", distance).as_str(),
+                    format!("{:.2}", accel_distance).as_str(),
+                    format!("{:.2}", self.distance).as_str(),
                     format!("{:.2}", target_speed).as_str(),
                     format!("{:.2}", current_pos.v_forward).as_str(),
                     format!("{:.2}", speed_error).as_str(),
                     format!("{:.2}", new_speed).as_str(),
-                    format!("{:.6}", proportional).as_str(),
-                    format!("{:.6}", integral).as_str()
+                    format!("{:.4}", proportional).as_str(),
+                    format!("{:.4}", integral).as_str()
                 );
 
                 motor_left.set_speed(new_speed);
@@ -107,7 +112,8 @@ impl TrajectorySegment for StraightLine {
             } else if speed_set {
                 // use standard feedforward - more reactive
                 debug!(
-                    "StraightLine: standard feedforward: target_speed: {} m/s",
+                    "StraightLine {}: standard feedforward: target_speed: {} m/s",
+                    i,
                     format!("{:.2}", target_speed).as_str()
                 );
                 motor_left.set_speed(target_speed);

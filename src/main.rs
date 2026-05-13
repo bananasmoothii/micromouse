@@ -263,7 +263,7 @@ async fn motor_tests(mut motor_left: Motor<'static, TIM3>, mut motor_right: Moto
         distance: 1.0,
         out_speed: 0.0,
     };
-    trajectory.execute(&mut motor_left, &mut motor_right, Some(0.2)).await;
+    trajectory.execute(&mut motor_left, &mut motor_right, Some(2.3)).await;
 }
 
 /*
