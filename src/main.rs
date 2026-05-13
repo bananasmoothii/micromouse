@@ -4,6 +4,7 @@ extern crate alloc;
 
 mod devices;
 pub mod dimensions;
+mod flash_log;
 mod i2c_devices;
 mod labyrinth;
 mod panic_handler;
@@ -70,6 +71,10 @@ async fn main(mut spawner: Spawner) {
     // poc_trajectory_svg();
 
     let p = embassy_stm32::init(Default::default());
+
+    // Replay any log saved during the previous run, then erase the sector.
+    let mut flash = embassy_stm32::flash::Flash::new_blocking(p.FLASH);
+    flash_log::startup_dump(&mut flash);
 
     spawner
         .spawn(battery_monitoring_task(
@@ -234,7 +239,7 @@ async fn main(mut spawner: Spawner) {
         .unwrap();
 
 
-    spawner.spawn(motor_tests(motor_left, motor_right)).unwrap();
+    spawner.spawn(motor_tests(motor_left, motor_right, flash)).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
@@ -260,13 +265,18 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
 }
 
 #[embassy_executor::task]
-async fn motor_tests(mut motor_left: Motor<'static, TIM3>, mut motor_right: Motor<'static, TIM2>) {
+async fn motor_tests(
+    mut motor_left: Motor<'static, TIM3>,
+    mut motor_right: Motor<'static, TIM2>,
+    mut flash: embassy_stm32::flash::Flash<'static, embassy_stm32::flash::Blocking>,
+) {
     2.s_timer().await;
     let trajectory = StraightLine {
         distance: 1.0,
         out_speed: 0.0,
     };
     trajectory.execute(&mut motor_left, &mut motor_right, Some(0.41)).await;
+    flash_log::flush(&mut flash);
 
     /*    const TEST_PWM: f32 = 0.2;
 
