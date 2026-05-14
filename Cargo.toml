@@ -50,7 +50,7 @@ build = [
 ]
 
 [[bin]]
-name = "test"
+name = "micromouse"
 path = "src/main.rs"
 test = false
 doctest = false

@@ -12,14 +12,16 @@ pub mod positioning;
 mod trajectory;
 pub mod utils;
 
-use crate::devices::battery::battery_monitoring_task;
-use crate::devices::buzzer::{buzzer_task};
-use crate::devices::hall_sensor_3144::hall_sensor_continuous_measuring;
+use crate::devices::battery::{start_battery_monitoring};
+use crate::devices::buzzer::buzzer_task;
+use crate::devices::hall_sensor_3144;
 use crate::devices::motors::{Motor, WheelSide};
 use crate::devices::mpu9250::Mpu9250Sensor;
-use crate::devices::vl53lxx::vl53l1x::{VL53L1XSensor};
-use crate::positioning::{positioning_task};
-use crate::utils::{DurationUtils, HertzUtils};
+use crate::positioning::odometry::{left_wheel_velocity, right_wheel_velocity};
+use crate::positioning::{positioning_task, CURRENT_POS};
+use crate::trajectory::TrajectorySegment;
+use crate::trajectory::straight_line::StraightLine;
+use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use defmt::*;
@@ -27,6 +29,7 @@ use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::{self, ExtiInput};
+use embassy_stm32::flash::Flash;
 use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
 use embassy_stm32::peripherals::{I2C1, TIM1, TIM2, TIM3};
 use embassy_stm32::spi::Spi;
@@ -36,23 +39,17 @@ use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
-use embedded_alloc::LlffHeap as Heap;
-use crate::positioning::odometry::{left_wheel_velocity, right_wheel_velocity};
 use embassy_time::Instant;
-use crate::trajectory::straight_line::StraightLine;
-use crate::trajectory::TrajectorySegment;
+use embedded_alloc::LlffHeap as Heap;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
-const HEAP_SIZE: usize = // Add all big structs here !
-    size_of::<VL53L1XSensor>() * 3 + size_of::<Mpu9250Sensor>() + 10000;
+const HEAP_SIZE: usize = 10000;
 
 bind_interrupts!(
     struct Irqs {
         EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
         EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
-        EXTI2 => exti::InterruptHandler<interrupt::typelevel::EXTI2>;
-        EXTI3 => exti::InterruptHandler<interrupt::typelevel::EXTI3>;
         EXTI4 => exti::InterruptHandler<interrupt::typelevel::EXTI4>;
         EXTI9_5 => exti::InterruptHandler<interrupt::typelevel::EXTI9_5>;
         EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
@@ -68,92 +65,68 @@ async fn main(mut spawner: Spawner) {
         embedded_alloc::init!(HEAP, HEAP_SIZE);
     }
 
-    // poc_trajectory_svg();
-
     let p = embassy_stm32::init(Default::default());
 
+    start_battery_monitoring(
+        &spawner,
+        Adc::new(p.ADC1),
+        None,
+        p.PC1,
+        p.PC4,
+        [
+            Output::new(p.PB1, Level::High, Speed::Low),
+            Output::new(p.PB15, Level::High, Speed::Low),
+            Output::new(p.PB14, Level::High, Speed::Low),
+            Output::new(p.PB13, Level::High, Speed::Low),
+        ],
+    )
+        .await;
+
+    let buzzer_channel = PwmPin::new(p.PA11, OutputType::PushPull);
+
+    spawner
+        .spawn(buzzer_task(
+            SimplePwm::new(
+                p.TIM1,
+                None,
+                None,
+                None,
+                Some(buzzer_channel),
+                1000.hz(),
+                CountingMode::EdgeAlignedUp,
+            ),
+            Channel::Ch4,
+        ))
+        .unwrap();
+
     // Replay any log saved during the previous run, then erase the sector.
-    let mut flash = embassy_stm32::flash::Flash::new_blocking(p.FLASH);
+    let mut flash = Flash::new_blocking(p.FLASH);
     flash_log::startup_dump(&mut flash);
 
-    spawner
-        .spawn(battery_monitoring_task(
-            Adc::new(p.ADC1),
-            None,
-            p.PC1,
-            p.PC4,
-            [
-                Output::new(p.PB1, Level::High, Speed::Low),
-                Output::new(p.PB15, Level::High, Speed::Low),
-                Output::new(p.PB14, Level::High, Speed::Low),
-                Output::new(p.PB13, Level::High, Speed::Low),
-            ],
-        ))
-        .unwrap();
-
-    let pwm1_pin = PwmPin::new(p.PB4, OutputType::PushPull);
-    let pwm1 = SimplePwm::new(
-        p.TIM3,
-        Some(pwm1_pin),
-        None,
-        None,
-        None,
-        Hertz::khz(15),
-        CountingMode::EdgeAlignedUp,
-    );
-
-    let pwm2_pin = PwmPin::new(p.PB10, OutputType::PushPull);
-    let pwm2 = SimplePwm::new(
-        p.TIM2,
-        None,
-        None,
-        Some(pwm2_pin),
-        None,
-        Hertz::khz(15),
-        CountingMode::EdgeAlignedUp,
-    );
-
-    let mut motor_left = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1, WheelSide::Left);
-    let mut motor_right = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3, WheelSide::Right);
-
-    // motor1.set_speed(0.20);
-    // motor2.set_speed(0.20);
-    info!("speed set");
-
-    // Start overcurrent protection
-    spawner
-        .spawn(devices::motors::overcurrent_protection_task(
-            Adc::new(p.ADC2),
-            p.PA4,
-            p.PB0,
-            p.PA0,
-            p.PA1,
-        ))
-        .unwrap();
-
     /*
-        init_i2c_devices(
-            &mut spawner,
-            p.I2C1,
-            p.PB8,
-            p.PB9,
-            p.DMA1_CH6,
-            p.DMA1_CH0,
-            Irqs,
-            [
-                Output::new(p.PB7, Level::Low, Speed::Low),
-                Output::new(p.PB2, Level::Low, Speed::Low),
-                Output::new(p.PB12, Level::Low, Speed::Low),
-            ],
-            [
-                ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
-                ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
-                ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
-            ],
-        )
-            .await;
+    // TODO: add pull-up resistors to SDA and SCL
+       init_i2c_devices(
+           &mut spawner,
+           p.I2C1,
+           p.PB8,
+           p.PB9,
+           p.DMA1_CH6,
+           p.DMA1_CH0,
+           Irqs,
+           [
+               Output::new(p.PB7, Level::Low, Speed::Low),
+               Output::new(p.PB2, Level::Low, Speed::Low),
+               Output::new(p.PB12, Level::Low, Speed::Low),
+           ],
+           [
+               ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
+               ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
+               ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
+           ],
+       )
+           .await;
 
-     */
+    */
 
     // Start Positioning task
     // spawner.spawn(positioning_task()).unwrap();
@@ -207,39 +180,47 @@ async fn main(mut spawner: Spawner) {
 
     spawner.spawn(positioning_task(imu)).unwrap();
 
+    hall_sensor_3144::init(p.PC2, p.EXTI2, p.PC3, p.EXTI3);
+
+    let pwm1_pin = PwmPin::new(p.PB4, OutputType::PushPull);
+    let pwm1 = SimplePwm::new(
+        p.TIM3,
+        Some(pwm1_pin),
+        None,
+        None,
+        None,
+        Hertz::khz(15),
+        CountingMode::EdgeAlignedUp,
+    );
+
+    let pwm2_pin = PwmPin::new(p.PB10, OutputType::PushPull);
+    let pwm2 = SimplePwm::new(
+        p.TIM2,
+        None,
+        None,
+        Some(pwm2_pin),
+        None,
+        Hertz::khz(15),
+        CountingMode::EdgeAlignedUp,
+    );
+
+    let mut motor_left = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1, WheelSide::Left);
+    let mut motor_right = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3, WheelSide::Right);
+
+    // Start overcurrent protection
     spawner
-        .spawn(hall_sensor_continuous_measuring(
-            ExtiInput::new(p.PC2, p.EXTI2, Pull::None, Irqs),
-            WheelSide::Left,
+        .spawn(devices::motors::overcurrent_protection_task(
+            Adc::new(p.ADC2),
+            p.PA4,
+            p.PB0,
+            p.PA0,
+            p.PA1,
         ))
         .unwrap();
 
     spawner
-        .spawn(hall_sensor_continuous_measuring(
-            ExtiInput::new(p.PC3, p.EXTI3, Pull::None, Irqs),
-            WheelSide::Right,
-        ))
+        .spawn(motor_tests(motor_left, motor_right, flash))
         .unwrap();
-
-    let buzzer_channel = PwmPin::new(p.PA11, OutputType::PushPull);
-
-    spawner
-        .spawn(buzzer_task(
-            SimplePwm::new(
-                p.TIM1,
-                None,
-                None,
-                None,
-                Some(buzzer_channel),
-                1000.hz(),
-                CountingMode::EdgeAlignedUp,
-            ),
-            Channel::Ch4,
-        ))
-        .unwrap();
-
-
-    spawner.spawn(motor_tests(motor_left, motor_right, flash)).unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
@@ -268,53 +249,72 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
 async fn motor_tests(
     mut motor_left: Motor<'static, TIM3>,
     mut motor_right: Motor<'static, TIM2>,
-    mut flash: embassy_stm32::flash::Flash<'static, embassy_stm32::flash::Blocking>,
+    mut flash: Flash<'static, embassy_stm32::flash::Blocking>,
 ) {
     2.s_timer().await;
-    let trajectory = StraightLine {
-        distance: 1.0,
+    /*let trajectory = StraightLine {
+        distance: 2.0,
         out_speed: 0.0,
     };
-    trajectory.execute(&mut motor_left, &mut motor_right, Some(0.41)).await;
+    trajectory
+        .execute(&mut motor_left, &mut motor_right, Some(0.41))
+        .await;
+    // flash_log!("JHJJJJJJ");
+    2.s_timer().await;
     flash_log::flush(&mut flash);
+*/
+
+    let speed = 0.75;
+    motor_left.set_speed(speed);
+    motor_right.set_speed(speed);
+
+    let start = Instant::now();
+
+    while Instant::now() - start < 2.s() {
+        debug!("current speed: {} m/s", CURRENT_POS.get().v_forward);
+        20.ms_timer().await;
+    }
+    motor_left.neutral();
+    motor_right.neutral();
+
 
     /*    const TEST_PWM: f32 = 0.2;
 
-    2.s_timer().await;
-    info!("PWM calibration: starting at PWM={}", TEST_PWM);
+        2.s_timer().await;
+        info!("PWM calibration: starting at PWM={}", TEST_PWM);
 
-    motor_left.set_pwm(TEST_PWM);
-    motor_right.set_pwm(TEST_PWM);
+        motor_left.set_pwm(TEST_PWM);
+        motor_right.set_pwm(TEST_PWM);
 
-    // Wait for spin-up before sampling
-    1.s_timer().await;
+        // Wait for spin-up before sampling
+        1.s_timer().await;
 
-    // Sample instantaneous velocity (derived from tick intervals, not tick totals)
-    // 40 samples × 50 ms = 2 s window; positioning_task drains tick totals every 20 ms
-    // but never touches the interval atomics, so this approach is drain-safe.
-    let mut left_sum = 0.0f32;
-    let mut right_sum = 0.0f32;
-    for _ in 0..40u32 {
-        let now_us = Instant::now().as_micros() as u32;
-        left_sum += left_wheel_velocity(now_us).abs();
-        right_sum += right_wheel_velocity(now_us).abs();
-        50.ms_timer().await;
-    }
+        // Sample instantaneous velocity (derived from tick intervals, not tick totals)
+        // 40 samples × 50 ms = 2 s window; positioning_task drains tick totals every 20 ms
+        // but never touches the interval atomics, so this approach is drain-safe.
+        let mut left_sum = 0.0f32;
+        let mut right_sum = 0.0f32;
+        for _ in 0..40u32 {
+            let now_us = Instant::now().as_micros() as u32;
+            left_sum += left_wheel_velocity(now_us).abs();
+            right_sum += right_wheel_velocity(now_us).abs();
+            50.ms_timer().await;
+        }
 
-    motor_left.brake();
-    motor_right.brake();
+        motor_left.brake();
+        motor_right.brake();
 
-    let left_speed = left_sum / 40.0;
-    let right_speed = right_sum / 40.0;
+        let left_speed = left_sum / 40.0;
+        let right_speed = right_sum / 40.0;
 
-    info!("Speed — left: {} m/s, right: {} m/s", left_speed, right_speed);
-    info!(
-        "PWM_TO_SPEED_FACTOR — left: {}, right: {}, avg: {}",
-        left_speed / TEST_PWM,
-        right_speed / TEST_PWM,
-        (left_speed + right_speed) / 2.0 / TEST_PWM,
-    );
-*/
+        info!("Speed — left: {} m/s, right: {} m/s", left_speed, right_speed);
+        info!(
+            "PWM_TO_SPEED_FACTOR — left: {}, right: {}, avg: {}",
+            left_speed / TEST_PWM,
+            right_speed / TEST_PWM,
+            (left_speed + right_speed) / 2.0 / TEST_PWM,
+        );
+    */
 }
 
 /*

@@ -13,7 +13,7 @@ pub struct BuzzerTask {
     pub duration: Duration,
 }
 
-pub static BUZZER_CHANNEL: Channel<CriticalSectionRawMutex, BuzzerTask, 16> = Channel::new();
+pub static BUZZER_CHANNEL: Channel<CriticalSectionRawMutex, BuzzerTask, 32> = Channel::new();
 
 const STARTING_BIP: bool = true;
 

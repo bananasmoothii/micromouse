@@ -9,8 +9,9 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use crate::positioning::types::PositionState;
 use crate::utils::{CellMutexUtils, DurationUtils};
-use defmt::{error, info};
-use crate::positioning::odometry::get_odom_delta;
+use defmt::{debug, error, info};
+use crate::positioning::odometry::{get_odom_delta, left_wheel_velocity, right_wheel_velocity};
+use embassy_time::Instant;
 
 /// `v_forward` is derived from wheel tick timestamps, not accelerometer integration.
 /// In curves, skid-steering lateral slip makes it slightly overestimate actual forward velocity,
@@ -42,7 +43,13 @@ pub async fn positioning_task(mpu: &'static mut Mpu9250Sensor) {
         };
 
         let state = fusion_proc.update(odom_delta, mpu_result);
-        // info!("Position: {}", state);
+        // let now_us = Instant::now().as_micros() as u32;
+        // debug!(
+        //     "speed — left: {} m/s, right: {} m/s, combined: {} m/s",
+        //     left_wheel_velocity(now_us),
+        //     right_wheel_velocity(now_us),
+        //     state.v_forward,
+        // );
         CURRENT_POS.set(state);
 
         20.ms_timer().await;

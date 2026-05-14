@@ -6,25 +6,34 @@ use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils, MathUtils};
 use alloc::format;
 use core::sync::atomic::Ordering::Relaxed;
 use core::sync::atomic::{AtomicI32, AtomicU32};
-use defmt::{debug, trace};
+use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
+use defmt::{debug, info, trace};
 use embassy_stm32::peripherals::{TIM1, TIM2, TIM3};
 use futures_util::future::err;
 use micromath::F32Ext;
+use crate::flash_log;
 
 const MAX_SPEED_M_S: f32 = 0.5;
 
 // PI controller parameters — tune empirically on hardware
 // Start with KI=0, raise KP until slight oscillation, back off ~30%, then add KI.
-const KP: f32 = 0.05; // (m/s output) / (m/s error) — dimensionless
+const KP: f32 = 0.15; // (m/s output) / (m/s error) — dimensionless
 const KI: f32 = 0.00; // per tick; keep KI * typical_error << MAX_I
+
+// ^ also consider tweaking V_ALPHA in fusion.rs when tweaking these consts ^
+// (smoothes out speed from odometry)
 
 /// P correction capped at X m/s per tick
 const MAX_P: f32 = 0.1;
 /// I correction (integral anti-windup)
 const MAX_I: f32 = 0.05;
 
-/// Accelerates to max speed, maintains it, then decelerates.
-/// This results in a trapezoidal speed profile.
+/// We need this to stop at a precise distance
+const DECELERATION_SPEED: f32 = 0.3;
+
+/// Accelerates to max speed (if possible), maintains it, then decelerates.
+/// Acceleration is done purely through PI control, deceleration is commanded gradually (still
+/// through PI control to satisfy DECELERATION_SPEED.
 /// Implementation is distance-based, not time-based
 pub struct StraightLine {
     pub distance: f32,
@@ -44,26 +53,25 @@ impl TrajectorySegment for StraightLine {
         };
 
         let start_pos = CURRENT_POS.get();
+        let left_ticks_start = LEFT_TICKS_CUMULATIVE.load(core::sync::atomic::Ordering::Relaxed);
+        let right_ticks_start = RIGHT_TICKS_CUMULATIVE.load(core::sync::atomic::Ordering::Relaxed);
         let start_speed = override_start_speed
             .unwrap_or(start_pos.v_forward)
             .clamp(-MAX_SPEED_M_S, MAX_SPEED_M_S);
 
-        // Effective deceleration the PI can sustain: max correction per tick × tick rate.
-        // Tuning MAX_P or MAX_I automatically adjusts the braking distance.
-        let effective_decel_m_s2: f32 = (MAX_P + MAX_I) / (UPDATE_INTERVAL_MS as f32 / 1000.0);
-
         // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
         let decel_distance_full_speed =
-            (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * effective_decel_m_s2);
+            (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * DECELERATION_SPEED);
         let (max_reachable_speed, decel_distance) = if decel_distance_full_speed <= self.distance {
             (MAX_SPEED_M_S, decel_distance_full_speed)
         } else {
             // v_max² = 2aΔx + v_final²    (with Δx = self.distance)
             (
-                (2.0 * effective_decel_m_s2 * self.distance + self.out_speed.square()).sqrt(),
+                (2.0 * DECELERATION_SPEED * self.distance + self.out_speed.square()).sqrt(),
                 self.distance,
             )
         };
+        let decel_start_distance = self.distance - decel_distance;
 
         let mut target_speed = max_reachable_speed;
         let mut commanded_speed = start_speed;
@@ -74,20 +82,31 @@ impl TrajectorySegment for StraightLine {
             let distance = current_pos.distance_from(&start_pos);
 
             if distance >= self.distance {
+                let left_ticks = LEFT_TICKS_CUMULATIVE.load(core::sync::atomic::Ordering::Relaxed) - left_ticks_start;
+                let right_ticks = RIGHT_TICKS_CUMULATIVE.load(core::sync::atomic::Ordering::Relaxed) - right_ticks_start;
+                info!(
+                    "Distance reached: left {} ticks ({} turns), right {} ticks ({} turns), speed error: {}",
+                    left_ticks,
+                    left_ticks / 12,
+                    right_ticks,
+                    right_ticks / 12,
+                    current_pos.v_forward - self.out_speed,
+                );
+                motors.set_speed(self.out_speed);
                 break;
             }
 
             // update target speed
-            if distance >= self.distance - decel_distance {
-                target_speed = self.out_speed;
+            if distance >= decel_start_distance {
+                target_speed -= DECELERATION_SPEED * (UPDATE_INTERVAL_MS as f32 / 1000.0);
             }
             let speed_error = target_speed - current_pos.v_forward;
 
             let proportional = (KP * speed_error).clamp(-MAX_P, MAX_P);
             integral = (integral + KI * speed_error).clamp(-MAX_I, MAX_I);
-            commanded_speed = (commanded_speed + proportional + integral);
-            // .clamp(-max_reachable_speed, max_reachable_speed);
-            debug!(
+            commanded_speed = (commanded_speed + proportional + integral)
+                .clamp(-1.5 * MAX_SPEED_M_S, 1.5 * MAX_SPEED_M_S);
+            flash_log!(
                 "StraightLine ({}/{}m): target_speed: {} m/s, current_speed: {} m/s, error: {} m/s, commanded_speed: {} m/s, P: {} m/s, I: {} m/s",
                 format!("{:.2}", distance).as_str(),
                 format!("{:.2}", self.distance).as_str(),
@@ -101,10 +120,10 @@ impl TrajectorySegment for StraightLine {
 
             motors.set_speed(commanded_speed);
 
-            if speed_error < 0.0 {
+            if speed_error < 0.0 && target_speed < max_reachable_speed {
                 let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
-                    freq: (((speed_error + 1.5) * 500.0) as u32).hz(),
-                    duration: 10.ms(),
+                    freq: 2000.hz(),
+                    duration: 20.ms(),
                 });
             }
 

@@ -120,7 +120,10 @@ impl SensorFusion {
         // as the robot slows without needing another tick to fire.
         let now_us = Instant::now().as_micros() as u32;
         let v_center = (left_wheel_velocity(now_us) + right_wheel_velocity(now_us)) / 2.0;
-        self.state.v_forward = v_center;
+        // EMA to smooth tick-rate aliasing (12 ticks/rev fires every ~23 ms at 0.45 m/s,
+        // close to the 20 ms sample period — raw readings are very noisy).
+        const V_ALPHA: f32 = 0.3; // 0 = frozen, 1 = raw; lower = smoother but more lag
+        self.state.v_forward = V_ALPHA * v_center + (1.0 - V_ALPHA) * self.state.v_forward;
 
         // Predict: integrate velocity; uncertainty grows by Q_XY_VEL
         self.state.x += v_center * cos_theta * mpu.dt;

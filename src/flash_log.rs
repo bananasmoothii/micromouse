@@ -15,7 +15,7 @@
 
 use core::fmt::Write as FmtWrite;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use defmt::info;
+use defmt::{info, println};
 use embassy_stm32::flash::{Blocking, Flash};
 use embassy_time::Instant;
 
@@ -111,7 +111,7 @@ pub fn startup_dump(flash: &mut Flash<'_, Blocking>) {
             core::slice::from_raw_parts(base.add(offset + WRITE_SIZE), msg_len)
         };
         if let Ok(s) = core::str::from_utf8(msg_bytes) {
-            info!("{}", s);
+            println!("{}", s);
         }
         count += 1;
         offset += WRITE_SIZE + padded;
@@ -141,7 +141,8 @@ pub fn flush(flash: &mut Flash<'_, Blocking>) {
 
 #[macro_export]
 macro_rules! flash_log {
-    ($($arg:tt)*) => {
+    ($($arg:tt)*) => {{
+        defmt::println!($($arg)*);
         $crate::flash_log::write_fmt(format_args!($($arg)*))
-    };
+    }};
 }
