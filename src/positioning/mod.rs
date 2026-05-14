@@ -9,13 +9,13 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use crate::positioning::types::PositionState;
 use crate::utils::{CellMutexUtils, DurationUtils};
-use defmt::{debug, error, info};
-use crate::positioning::odometry::{get_odom_delta, left_wheel_velocity, right_wheel_velocity};
-use embassy_time::Instant;
+use defmt::{error, info};
+use crate::positioning::odometry::get_odom_delta;
 
-/// `v_forward` is derived from wheel tick timestamps, not accelerometer integration.
-/// In curves, skid-steering lateral slip makes it slightly overestimate actual forward velocity,
-/// but corners are short enough that the EKF self-corrects before error accumulates.
+/// `v_forward` is the EMA-smoothed tick-count velocity: ticks accumulated over the 20 ms fusion
+/// window divided by dt, giving a true average with no aliasing artefacts (see fusion.rs for
+/// details). In curves it slightly underestimates forward speed (chord vs arc), but the error
+/// is negligible over the short 20 ms windows.
 pub static CURRENT_POS: Mutex<CriticalSectionRawMutex, Cell<PositionState>> = Mutex::new(Cell::new(PositionState {
     x: 0.0,
     y: 0.0,
@@ -43,13 +43,6 @@ pub async fn positioning_task(mpu: &'static mut Mpu9250Sensor) {
         };
 
         let state = fusion_proc.update(odom_delta, mpu_result);
-        // let now_us = Instant::now().as_micros() as u32;
-        // debug!(
-        //     "speed — left: {} m/s, right: {} m/s, combined: {} m/s",
-        //     left_wheel_velocity(now_us),
-        //     right_wheel_velocity(now_us),
-        //     state.v_forward,
-        // );
         CURRENT_POS.set(state);
 
         20.ms_timer().await;

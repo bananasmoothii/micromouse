@@ -1,66 +1,30 @@
-use crate::devices::hall_sensor_3144::{
-    LEFT_LAST_TICK_US, LEFT_TICK_INTERVAL_US, LEFT_TICKS_TOTAL,
-    RIGHT_LAST_TICK_US, RIGHT_TICK_INTERVAL_US, RIGHT_TICKS_TOTAL,
-};
-use crate::devices::motors::{LEFT_FORWARD, RIGHT_FORWARD};
+use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
 use crate::positioning::types::MovementDelta;
 use core::f32::consts::PI;
 use core::sync::atomic::Ordering;
 use micromath::F32Ext;
 
-/// Physical radius of the wheels in meters. Matches the actual tire size.
+/// Physical radius of the wheels in meters.
 pub const WHEEL_RADIUS: f32 = 0.020;
 
 /// Distance between the two differential wheels in meters (track width).
 pub const WHEEL_BASE: f32 = 0.078;
 
-/// Raw odometry resolution: Number of hall effect ticks generated per full wheel revolution.
-pub const TICKS_PER_REVOLUTION: f32 = 12.0;
+/// Hall sensor ticks per full wheel revolution (12 magnets, one tick each).
+pub const TICKS_PER_REVOLUTION: u32 = 12;
 
-pub const DISTANCE_PER_TICK: f32 = 2.0 * PI * WHEEL_RADIUS / TICKS_PER_REVOLUTION;
+/// Arc length per tick: circumference / ticks_per_rev.
+pub const DISTANCE_PER_TICK: f32 = 2.0 * PI * WHEEL_RADIUS / (TICKS_PER_REVOLUTION as f32);
 
-/// Speed below which the wheel is considered stopped.
-const STALL_SPEED_M_S: f32 = 0.02;
-/// Tick gap corresponding to STALL_SPEED_M_S — no tick within this window means stopped.
-const MAX_TICK_GAP_US: u32 = (DISTANCE_PER_TICK / STALL_SPEED_M_S * 1_000_000.0) as u32;
-
-/// Smooth signed wheel velocity (m/s) derived from inter-tick timestamps.
-///
-/// Uses `max(elapsed_since_last_tick, last_tick_interval)` as the effective period:
-/// - Constant speed: elapsed ≈ interval → stable velocity.
-/// - Decelerating: elapsed > interval → period grows → velocity decreases smoothly without waiting for the next tick.
-/// - Stopped: elapsed exceeds MAX_TICK_GAP_US → returns 0.
-/// - Fewer than two ticks fired (interval == 0): returns 0.
-pub fn smooth_wheel_velocity(last_us: u32, interval_us: u32, now_us: u32, forward: bool) -> f32 {
-    if interval_us == 0 {
-        return 0.0;
-    }
-    let elapsed_us = now_us.wrapping_sub(last_us);
-    if elapsed_us > MAX_TICK_GAP_US {
-        return 0.0;
-    }
-    let period_us = elapsed_us.max(interval_us);
-    let v = DISTANCE_PER_TICK / (period_us as f32 * 1e-6);
-    if forward { v } else { -v }
-}
-
-pub fn left_wheel_velocity(now_us: u32) -> f32 {
-    smooth_wheel_velocity(
-        LEFT_LAST_TICK_US.load(Ordering::Relaxed),
-        LEFT_TICK_INTERVAL_US.load(Ordering::Relaxed),
-        now_us,
-        LEFT_FORWARD.load(Ordering::Relaxed),
-    )
-}
-
-pub fn right_wheel_velocity(now_us: u32) -> f32 {
-    smooth_wheel_velocity(
-        RIGHT_LAST_TICK_US.load(Ordering::Relaxed),
-        RIGHT_TICK_INTERVAL_US.load(Ordering::Relaxed),
-        now_us,
-        RIGHT_FORWARD.load(Ordering::Relaxed),
-    )
-}
+// --- Velocity architecture note ---
+// Forward velocity (v_forward) is derived from tick *count* accumulated over each 20 ms
+// fusion window: v = odom_delta.dx / dt. This is computed in fusion::SensorFusion::update().
+//
+// An earlier tick-*interval* approach (DISTANCE_PER_TICK / inter_tick_time) was tried but
+// discarded: with only 12 ticks/rev the inter-tick period (~11 ms at 0.5 m/s) aliases badly
+// against the 20 ms sample rate, producing large periodic velocity spikes that corrupt the
+// PI speed controller. The tick-count method has bounded quantisation noise (0–2 ticks per
+// window) and no aliasing spikes, making it far more suitable as a controller input.
 
 /// Drains accumulated ticks since last call and returns the movement delta.
 pub fn get_odom_delta() -> MovementDelta {

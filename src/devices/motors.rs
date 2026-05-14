@@ -17,8 +17,8 @@ pub enum WheelSide {
     Right,
 }
 
-const LEFT_WHEEL_SPEED_FACTOR: f32 = 0.98;
-const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.02;
+const LEFT_WHEEL_SPEED_FACTOR: f32 = 0.97;
+const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.03;
 
 /// PWM duty cycle → m/s, measured at CALIBRATION_VOLTAGE.
 const PWM_TO_SPEED_FACTOR: f32 = 4.15;
@@ -26,6 +26,9 @@ const PWM_TO_SPEED_FACTOR: f32 = 4.15;
 const CALIBRATION_VOLTAGE: f32 = 8.3;
 
 const MIN_USABLE_PWM: f32 = 0.095;
+
+/// Motors might not turn below this due to too low regime
+pub const MIN_USABLE_SPEED: f32 = MIN_USABLE_PWM * PWM_TO_SPEED_FACTOR;
 
 pub struct Motor<'d, T: GeneralInstance4Channel> {
     in_a: Output<'d>,

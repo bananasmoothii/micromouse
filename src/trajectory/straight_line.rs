@@ -12,12 +12,13 @@ use embassy_stm32::peripherals::{TIM1, TIM2, TIM3};
 use futures_util::future::err;
 use micromath::F32Ext;
 use crate::flash_log;
+use crate::positioning::odometry::TICKS_PER_REVOLUTION;
 
-const MAX_SPEED_M_S: f32 = 0.5;
+const MAX_SPEED_M_S: f32 = 0.75;
 
 // PI controller parameters — tune empirically on hardware
 // Start with KI=0, raise KP until slight oscillation, back off ~30%, then add KI.
-const KP: f32 = 0.15; // (m/s output) / (m/s error) — dimensionless
+const KP: f32 = 0.05; // (m/s output) / (m/s error) — dimensionless
 const KI: f32 = 0.00; // per tick; keep KI * typical_error << MAX_I
 
 // ^ also consider tweaking V_ALPHA in fusion.rs when tweaking these consts ^
@@ -29,7 +30,7 @@ const MAX_P: f32 = 0.1;
 const MAX_I: f32 = 0.05;
 
 /// We need this to stop at a precise distance
-const DECELERATION_SPEED: f32 = 0.3;
+const DECELERATION_SPEED: f32 = 0.8;
 
 /// Accelerates to max speed (if possible), maintains it, then decelerates.
 /// Acceleration is done purely through PI control, deceleration is commanded gradually (still
@@ -53,8 +54,8 @@ impl TrajectorySegment for StraightLine {
         };
 
         let start_pos = CURRENT_POS.get();
-        let left_ticks_start = LEFT_TICKS_CUMULATIVE.load(core::sync::atomic::Ordering::Relaxed);
-        let right_ticks_start = RIGHT_TICKS_CUMULATIVE.load(core::sync::atomic::Ordering::Relaxed);
+        let left_ticks_start = LEFT_TICKS_CUMULATIVE.load(Relaxed);
+        let right_ticks_start = RIGHT_TICKS_CUMULATIVE.load(Relaxed);
         let start_speed = override_start_speed
             .unwrap_or(start_pos.v_forward)
             .clamp(-MAX_SPEED_M_S, MAX_SPEED_M_S);
@@ -82,14 +83,14 @@ impl TrajectorySegment for StraightLine {
             let distance = current_pos.distance_from(&start_pos);
 
             if distance >= self.distance {
-                let left_ticks = LEFT_TICKS_CUMULATIVE.load(core::sync::atomic::Ordering::Relaxed) - left_ticks_start;
-                let right_ticks = RIGHT_TICKS_CUMULATIVE.load(core::sync::atomic::Ordering::Relaxed) - right_ticks_start;
+                let left_ticks = LEFT_TICKS_CUMULATIVE.load(Relaxed) - left_ticks_start;
+                let right_ticks = RIGHT_TICKS_CUMULATIVE.load(Relaxed) - right_ticks_start;
                 info!(
                     "Distance reached: left {} ticks ({} turns), right {} ticks ({} turns), speed error: {}",
                     left_ticks,
-                    left_ticks / 12,
+                    left_ticks / TICKS_PER_REVOLUTION as i32,
                     right_ticks,
-                    right_ticks / 12,
+                    right_ticks / TICKS_PER_REVOLUTION as i32,
                     current_pos.v_forward - self.out_speed,
                 );
                 motors.set_speed(self.out_speed);

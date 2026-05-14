@@ -15,9 +15,8 @@ pub mod utils;
 use crate::devices::battery::{start_battery_monitoring};
 use crate::devices::buzzer::buzzer_task;
 use crate::devices::hall_sensor_3144;
-use crate::devices::motors::{Motor, WheelSide};
+use crate::devices::motors::{Motor, WheelSide, MIN_USABLE_SPEED};
 use crate::devices::mpu9250::Mpu9250Sensor;
-use crate::positioning::odometry::{left_wheel_velocity, right_wheel_velocity};
 use crate::positioning::{positioning_task, CURRENT_POS};
 use crate::trajectory::TrajectorySegment;
 use crate::trajectory::straight_line::StraightLine;
@@ -252,69 +251,32 @@ async fn motor_tests(
     mut flash: Flash<'static, embassy_stm32::flash::Blocking>,
 ) {
     2.s_timer().await;
-    /*let trajectory = StraightLine {
+    let trajectory = StraightLine {
         distance: 2.0,
         out_speed: 0.0,
     };
     trajectory
-        .execute(&mut motor_left, &mut motor_right, Some(0.41))
+        .execute(&mut motor_left, &mut motor_right, Some(MIN_USABLE_SPEED))
         .await;
     // flash_log!("JHJJJJJJ");
     2.s_timer().await;
     flash_log::flush(&mut flash);
-*/
 
-    let speed = 0.75;
-    motor_left.set_speed(speed);
-    motor_right.set_speed(speed);
+    /*
+        let speed = 0.75;
+        motor_left.set_speed(speed);
+        motor_right.set_speed(speed);
 
-    let start = Instant::now();
+        let start = Instant::now();
 
-    while Instant::now() - start < 2.s() {
-        debug!("current speed: {} m/s", CURRENT_POS.get().v_forward);
-        20.ms_timer().await;
-    }
-    motor_left.neutral();
-    motor_right.neutral();
-
-
-    /*    const TEST_PWM: f32 = 0.2;
-
-        2.s_timer().await;
-        info!("PWM calibration: starting at PWM={}", TEST_PWM);
-
-        motor_left.set_pwm(TEST_PWM);
-        motor_right.set_pwm(TEST_PWM);
-
-        // Wait for spin-up before sampling
-        1.s_timer().await;
-
-        // Sample instantaneous velocity (derived from tick intervals, not tick totals)
-        // 40 samples × 50 ms = 2 s window; positioning_task drains tick totals every 20 ms
-        // but never touches the interval atomics, so this approach is drain-safe.
-        let mut left_sum = 0.0f32;
-        let mut right_sum = 0.0f32;
-        for _ in 0..40u32 {
-            let now_us = Instant::now().as_micros() as u32;
-            left_sum += left_wheel_velocity(now_us).abs();
-            right_sum += right_wheel_velocity(now_us).abs();
-            50.ms_timer().await;
+        while Instant::now() - start < 2.s() {
+            debug!("current speed: {} m/s", CURRENT_POS.get().v_forward);
+            20.ms_timer().await;
         }
-
-        motor_left.brake();
-        motor_right.brake();
-
-        let left_speed = left_sum / 40.0;
-        let right_speed = right_sum / 40.0;
-
-        info!("Speed — left: {} m/s, right: {} m/s", left_speed, right_speed);
-        info!(
-            "PWM_TO_SPEED_FACTOR — left: {}, right: {}, avg: {}",
-            left_speed / TEST_PWM,
-            right_speed / TEST_PWM,
-            (left_speed + right_speed) / 2.0 / TEST_PWM,
-        );
+        motor_left.neutral();
+        motor_right.neutral();
     */
+
 }
 
 /*

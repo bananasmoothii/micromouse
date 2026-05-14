@@ -1,10 +1,8 @@
 use crate::devices::hall_sensor_3144::{LEFT_TICK_INTERVAL_US, RIGHT_TICK_INTERVAL_US};
 use crate::positioning::mpu::MpuResult;
-use crate::positioning::odometry::{left_wheel_velocity, right_wheel_velocity};
 use crate::positioning::types::{MovementDelta, PositionState};
 use core::f32::consts::PI;
 use core::sync::atomic::Ordering;
-use embassy_time::Instant;
 use micromath::F32Ext;
 
 // Note: this is NOT a proper EKF. A real EKF maintains a full [x, y, θ] state vector with a 3×3
@@ -115,14 +113,21 @@ impl SensorFusion {
 
         // --- Position Kalman filter ---
 
-        // Velocity from per-wheel tick timestamps. The effective period =
-        // max(elapsed_since_last_tick, last_tick_interval), so velocity naturally decreases
-        // as the robot slows without needing another tick to fire.
-        let now_us = Instant::now().as_micros() as u32;
-        let v_center = (left_wheel_velocity(now_us) + right_wheel_velocity(now_us)) / 2.0;
-        // EMA to smooth tick-rate aliasing (12 ticks/rev fires every ~23 ms at 0.45 m/s,
-        // close to the 20 ms sample period — raw readings are very noisy).
-        const V_ALPHA: f32 = 0.3; // 0 = frozen, 1 = raw; lower = smoother but more lag
+        // Forward velocity from tick-count odometry: odom_delta.dx is the wheel arc accumulated
+        // over the 20 ms control window, so dividing by dt gives the true average speed over
+        // that window with no aliasing artefacts.
+        //
+        // An earlier approach used inter-tick timestamps (DISTANCE_PER_TICK / tick_interval).
+        // That gave better instantaneous resolution in theory, but with only 12 ticks/rev the
+        // inter-tick period (~11 ms at 0.5 m/s) aliases against the 20 ms sample period,
+        // producing large periodic spikes that corrupted the PI speed controller.
+        //
+        // The tick-count method's only downside is quantisation: at 0.75 m/s you get 1–2 ticks
+        // per window, so the raw reading snaps between 0.52 and 1.05 m/s. The EMA below
+        // smooths this; V_ALPHA can be higher than with the old method because the noise is
+        // bounded rather than spiky.
+        let v_center = odom_delta.dx / mpu.dt;
+        const V_ALPHA: f32 = 0.5;
         self.state.v_forward = V_ALPHA * v_center + (1.0 - V_ALPHA) * self.state.v_forward;
 
         // Predict: integrate velocity; uncertainty grows by Q_XY_VEL
