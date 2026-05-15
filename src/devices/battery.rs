@@ -13,6 +13,8 @@ use micromath::F32Ext;
 /// Current battery voltage in millivolts, updated by battery_monitoring_task.
 pub static BATTERY_VOLTAGE_MV: AtomicU32 = AtomicU32::new(0);
 
+static SAMPLE_CYCLES: SampleTime = SampleTime::CYCLES144;
+
 pub async fn start_battery_monitoring(
     spawner: &Spawner,
     mut adc_module: Adc<'static, ADC1>,
@@ -99,7 +101,7 @@ async fn handle_combined_cells(
     en_pin: &mut Output<'static>,
     leds: &mut [Output<'static>; 4],
 ) {
-    let raw_value = adc_module.blocking_read(second_cell_pin, SampleTime::CYCLES112);
+    let raw_value = adc_module.blocking_read(second_cell_pin, SAMPLE_CYCLES);
     let adc_voltage = (raw_value as f32 / 4095.0) * 3.3;
     let battery_voltage = adc_voltage * (R_TOP + R_BOTTOM) / R_BOTTOM;
 
@@ -130,8 +132,8 @@ async fn handle_two_cells(
 ) {
     // Read the ADC value from the second cell voltage divider
     // Using CYCLES112 for accurate readings from voltage divider (~1.3µs per read)
-    let raw_value1 = adc_module.blocking_read(first_cell_pin, SampleTime::CYCLES112);
-    let raw_value2 = adc_module.blocking_read(second_cell_pin, SampleTime::CYCLES112);
+    let raw_value1 = adc_module.blocking_read(first_cell_pin, SAMPLE_CYCLES);
+    let raw_value2 = adc_module.blocking_read(second_cell_pin, SAMPLE_CYCLES);
 
     // Convert raw ADC value (0-4095) to voltage at the ADC pin (0-3.3V)
     let adc_voltage1 = (raw_value1 as f32 / 4095.0) * 3.3;

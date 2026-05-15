@@ -79,7 +79,9 @@ pub fn write_fmt(args: core::fmt::Arguments) {
     });
 }
 
-/// If sector 7 contains a previous run's log, replay every entry via RTT then erase the sector.
+/// If sector 7 contains a previous run's log, replay every entry via RTT.
+/// Does NOT erase — the sector is only erased when `flush` is called at the end of a maneuver,
+/// so accidental power-on will never wipe unread data.
 /// Call once at the top of `main` before spawning tasks.
 pub fn startup_dump(flash: &mut Flash<'_, Blocking>) {
     // Flash is memory-mapped; read via volatile pointer — safe for data (not instruction) reads.
@@ -116,8 +118,8 @@ pub fn startup_dump(flash: &mut Flash<'_, Blocking>) {
         count += 1;
         offset += WRITE_SIZE + padded;
     }
-    info!("=== end — {} entries, erasing sector ===", count);
-    flash.blocking_erase(SECTOR_OFFSET, SECTOR_OFFSET + SECTOR_SIZE).ok();
+    info!("=== end — {} entries (sector kept, will be erased on next flush) ===", count);
+    let _ = flash; // consumed for API symmetry; erase deferred to flush()
 }
 
 /// Write the RAM buffer to flash.  Call after the run (motors stopped, robot still powered).

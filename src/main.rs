@@ -253,11 +253,13 @@ async fn motor_tests(
     2.s_timer().await;
     let trajectory = StraightLine {
         distance: 2.0,
-        out_speed: 0.0,
+        out_speed: MIN_USABLE_SPEED,
     };
     trajectory
         .execute(&mut motor_left, &mut motor_right, Some(MIN_USABLE_SPEED))
         .await;
+    motor_left.set_speed(0.0);
+    motor_right.set_speed(0.0);
     // flash_log!("JHJJJJJJ");
     2.s_timer().await;
     flash_log::flush(&mut flash);

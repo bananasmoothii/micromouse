@@ -126,7 +126,7 @@ impl SensorFusion {
         // per window, so the raw reading snaps between 0.52 and 1.05 m/s. The EMA below
         // smooths this; V_ALPHA can be higher than with the old method because the noise is
         // bounded rather than spiky.
-        let v_center = odom_delta.dx / mpu.dt;
+        let v_center = if mpu.dt > 0.0 { odom_delta.dx / mpu.dt } else { 0.0 };
         const V_ALPHA: f32 = 0.5;
         self.state.v_forward = V_ALPHA * v_center + (1.0 - V_ALPHA) * self.state.v_forward;
 
