@@ -17,25 +17,28 @@ use micromath::F32Ext;
 
 const MAX_SPEED_M_S: f32 = 0.75;
 
-// PI controller parameters — tune empirically on hardware
-// Start with KI=0, raise KP until slight oscillation, back off ~30%, then add KI.
-const KP: f32 = 0.13; // (m/s output) / (m/s error) — dimensionless
-const KI: f32 = 0.00; // per tick; keep KI * typical_error << MAX_I
-
-// ^ also consider tweaking V_ALPHA in fusion.rs when tweaking these consts ^
-// (smoothes out speed from odometry)
-
-// D term is intentionally omitted. The derivative term amplifies high-frequency noise in the
-// velocity signal — and our velocity is quantized to 0–2 ticks per 20 ms window, making the
-// sample-to-sample difference almost pure noise. A D term would produce large, random kick
-// corrections every cycle and destabilize the loop. The EMA in fusion.rs already provides
-// implicit damping (it smooths out sudden changes before they reach the controller), which
-// gives the lag-reduction benefit of D without amplifying the quantization noise.
-
-/// P correction capped at X m/s per tick
-const MAX_P: f32 = 0.1;
-/// I correction (integral anti-windup)
-const MAX_I: f32 = 0.05;
+// --- Speed controller: velocity-form (incremental) ---
+//
+// This is NOT a standard position-form PI (commanded = KP*e + KI*∫e).
+// Instead it uses the velocity form: commanded_speed accumulates a small increment each step:
+//
+//   commanded_speed += KP * clamp(error)
+//
+// What this means:
+//   - commanded_speed is itself the integrator. It holds the PWM level that was working last
+//     step and nudges it up or down based on current error. It never resets.
+//   - This gives natural "motor memory": if the robot reaches target speed and error → 0,
+//     commanded_speed stays at whatever PWM level achieved that, with no windup or jump.
+//   - Warm-start between segments works for free: commanded_speed carries over from the
+//     previous maneuver, so back-to-back segments don't lurch.
+//   - There is no separate KI term. Adding one would double-integrate the error (integral of
+//     an integral) and cause instability. The accumulation IS the integral action.
+//   - The MAX_P clamp limits how aggressively a single noisy sample can move commanded_speed,
+//     acting as a rate limiter against the quantized velocity signal.
+//
+// Tune KP: raise until commanded_speed oscillates visibly in the log, then back off ~30%.
+const KP: f32 = 0.13;
+const MAX_P: f32 = 0.1; // max commanded_speed change per 20 ms step (m/s)
 
 /// Straight-line heading PI: keeps the robot on its initial bearing.
 /// Negated because CW rotation (right turn) increases theta on this hardware (gyro z-axis down).
@@ -93,7 +96,6 @@ impl TrajectorySegment for StraightLine {
 
         let mut target_speed = max_reachable_speed;
         let mut commanded_speed = start_speed;
-        let mut integral = 0.0f32;
         let mut heading_integral = 0.0f32;
 
         loop {
@@ -142,20 +144,18 @@ impl TrajectorySegment for StraightLine {
                 target_speed -= DECELERATION_SPEED * (UPDATE_INTERVAL_MS as f32 / 1000.0);
             }
 
-            let proportional = (KP * speed_error).clamp(-MAX_P, MAX_P);
-            integral = (integral + KI * speed_error).clamp(-MAX_I, MAX_I);
-            commanded_speed = (commanded_speed + proportional + integral)
+            let increment = (KP * speed_error).clamp(-MAX_P, MAX_P);
+            commanded_speed = (commanded_speed + increment)
                 .clamp(-1.5 * MAX_SPEED_M_S, 1.5 * MAX_SPEED_M_S);
             flash_log!(
-                "StraightLine ({}/{}m): target: {}, current: {}, error: {}, commanded: {}, P: {}, I: {}, steer: {}, hdg: {}deg",
+                "StraightLine ({}/{}m): target: {}, current: {}, error: {}, commanded: {}, incr: {}, steer: {}, hdg: {}deg",
                 format!("{:.2}", distance).as_str(),
                 format!("{:.2}", self.distance).as_str(),
                 format!("{:.2}", target_speed).as_str(),
                 format!("{:.2}", current_pos.v_forward).as_str(),
                 format!("{:.2}", speed_error).as_str(),
                 format!("{:.2}", commanded_speed).as_str(),
-                format!("{:.4}", proportional).as_str(),
-                format!("{:.4}", integral).as_str(),
+                format!("{:.4}", increment).as_str(),
                 format!("{:.4}", steering).as_str(),
                 format!("{:.1}", heading_error.to_degrees()).as_str(),
             );
