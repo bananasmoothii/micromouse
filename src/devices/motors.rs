@@ -21,7 +21,8 @@ const LEFT_WHEEL_SPEED_FACTOR: f32 = 0.95;
 const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.05;
 
 /// PWM duty cycle → m/s, measured at CALIBRATION_VOLTAGE.
-const PWM_TO_SPEED_FACTOR: f32 = 4.3;
+/// VERY EMPIRICAL - might depend on the battery, the floor, the mood of the robot...
+const PWM_TO_SPEED_FACTOR: f32 = 4.67;
 /// Battery voltage (V) at which PWM_TO_SPEED_FACTOR was measured.
 const CALIBRATION_VOLTAGE: f32 = 8.3;
 
@@ -88,7 +89,7 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
             self.in_b.set_high();
         }
 
-        let duty = (self.pwm.max_duty_cycle() as f32 * actual_speed) as u32;
+        let duty = (self.pwm.max_duty_cycle() as f32 * actual_speed.abs()) as u32;
         let mut pwm_channel = self.pwm.channel(self.pwm_channel);
         pwm_channel.set_duty_cycle(duty);
         if !pwm_channel.is_enabled() {

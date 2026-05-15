@@ -15,8 +15,7 @@ PATTERN = re.compile(
     r"current: (?P<current>-?[\d.]+), "
     r"error: (?P<error>-?[\d.]+), "
     r"commanded: (?P<commanded>-?[\d.]+), "
-    r"P: (?P<P>-?[\d.]+), "
-    r"I: (?P<I>-?[\d.]+), "
+    r"incr: (?P<incr>-?[\d.]+), "
     r"steer: (?P<steer>-?[\d.]+), "
     r"hdg: (?P<hdg>-?[\d.]+)deg"
 )
@@ -41,8 +40,7 @@ target    = [r["target"]    for r in rows]
 current   = [r["current"]   for r in rows]
 commanded = [r["commanded"] for r in rows]
 error     = [r["error"]     for r in rows]
-P         = [r["P"]         for r in rows]
-I         = [r["I"]         for r in rows]
+incr      = [r["incr"]      for r in rows]
 steer     = [r["steer"]     for r in rows]
 hdg       = [r["hdg"]       for r in rows]
 total     = rows[0]["total"]
@@ -63,10 +61,9 @@ ax1.set_ylabel("Speed (m/s)")
 ax1.legend()
 ax1.grid(True, alpha=0.4)
 
-ax2.plot(dist, error,                  label=f"error           (σ={σ(error):.3f}, μ={mean(error):.3f})", color="tab:red")
-ax2.plot(dist, [v * 10 for v in P],   label="P correction ×10", color="tab:purple")
-ax2.plot(dist, [v * 10 for v in I],   label="I correction ×10", color="tab:green")
-ax2.plot(dist, [v * 10 for v in steer], label="steering ×10", color="tab:brown")
+ax2.plot(dist, error,                    label=f"error      (σ={σ(error):.3f}, μ={mean(error):.3f})", color="tab:red")
+ax2.plot(dist, [v * 10 for v in incr],  label="increment ×10", color="tab:purple")
+ax2.plot(dist, [v * 10 for v in steer], label="steering ×10",  color="tab:brown")
 ax2.plot(dist, [h / 10 for h in hdg],                      label=f"heading error (deg / 10)", color="tab:olive")
 ax2.axhline(0, color="black", linewidth=0.7)
 ax2.set_ylabel("m/s")

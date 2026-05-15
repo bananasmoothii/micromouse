@@ -1,6 +1,7 @@
 use crate::devices::hall_sensor_3144::{LEFT_TICK_INTERVAL_US, RIGHT_TICK_INTERVAL_US};
 use crate::positioning::mpu::MpuResult;
 use crate::positioning::types::{MovementDelta, PositionState};
+use crate::trajectory::FusionMode;
 use core::f32::consts::PI;
 use core::sync::atomic::Ordering;
 use micromath::F32Ext;
@@ -30,18 +31,27 @@ use micromath::F32Ext;
 /// We use 1×10⁻⁴ (10× larger) to add margin for temperature drift and bias instability.
 const Q_THETA_GYRO: f32 = 0.0001;
 
-/// Measurement noise when using odometry as a heading source.
-/// In a pure rolling differential drive, odometry heading would be accurate to a few degrees.
-/// With skid-steering, lateral slip in curves adds large errors — easily ±20–40° (0.35–0.70 rad),
-/// so variance ≈ 0.1–0.5 rad². We use 0.5 to keep gyro dominant during turns.
-/// Lower this if odometry heading proves reliable on your surface.
-const R_THETA_ODOM: f32 = 0.5;
+/// Hard cap on gyro d_theta per step to reject EMI spikes from motor startup current transients.
+/// Physical max at full turn speed: 2 × 1.0 / 0.078 × 0.022 s ≈ 0.56 rad (≈ 32°).
+/// With ±2000 DPS gyro, max possible per step = 2000° × π/180 × 0.022 s ≈ 0.77 rad (44°).
+/// Clamp at 40° sits above the physical max and well below the 44° gyro ceiling.
+const MAX_D_THETA_PER_STEP: f32 = 0.70;
+
+/// Measurement noise when using odometry as a heading source — straight-line driving.
+/// On a straight, both wheels roll without lateral slip so odometry heading is trustworthy.
+const R_THETA_ODOM_STRAIGHT: f32 = 0.5;
+
+/// Measurement noise when using odometry as a heading source — pivot turn.
+/// During a pivot the wheels scrub laterally: the geometric WHEEL_BASE underestimates the
+/// kinematic turning radius, so odometry consistently over-reports rotation. The gyro measures
+/// actual angular rate directly and is the ground truth here; odometry is effectively ignored.
+const R_THETA_ODOM_PIVOT: f32 = 50.0;
 
 /// Measurement noise when using the magnetometer as a heading source.
-/// DC motors generate strong, variable magnetic fields. Expect ±20–40° of noise near them,
-/// which gives variance ≈ 0.1–0.5 rad². We use 1.5 (std dev ≈ ±70°) to be conservative —
-/// if the magnetometer is heavily disturbed, raising this toward 5.0+ is appropriate.
-const R_THETA_MAG: f32 = 1.5;
+/// Motor current changes the local hard iron field during operation, causing ~30–80° of error
+/// during turns even after static calibration. R=10 keeps the correction gentle enough not
+/// to corrupt active turns while still correcting gyro drift during stationary phases.
+const R_THETA_MAG: f32 = 1000.0;
 
 // --- Position (XY) filter ---
 
@@ -80,11 +90,17 @@ impl SensorFusion {
         }
     }
 
-    pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult) -> PositionState {
+    pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult, mode: FusionMode) -> PositionState {
+        let r_theta_odom = match mode {
+            FusionMode::Pivot => R_THETA_ODOM_PIVOT,
+            _ => R_THETA_ODOM_STRAIGHT,
+        };
         // --- Heading Kalman filter ---
 
-        // Predict: gyro gives us d_theta directly; uncertainty grows by Q_THETA_GYRO
-        self.state.theta += mpu.d_theta;
+        // Predict: gyro gives us d_theta directly; uncertainty grows by Q_THETA_GYRO.
+        // Clamp to reject EMI spikes from motor current transients — real motion can't
+        // exceed MAX_D_THETA_PER_STEP; anything larger is electrical noise, not rotation.
+        self.state.theta += mpu.d_theta.clamp(-MAX_D_THETA_PER_STEP, MAX_D_THETA_PER_STEP);
         self.p_theta_gyro += Q_THETA_GYRO;
 
         // Update from odometry — only once both wheels have seen at least two consecutive ticks
@@ -93,12 +109,15 @@ impl SensorFusion {
         let odom_synced = LEFT_TICK_INTERVAL_US.load(Ordering::Relaxed) > 0
             && RIGHT_TICK_INTERVAL_US.load(Ordering::Relaxed) > 0;
         if odom_synced {
-            let k_theta_odom = self.p_theta_gyro / (self.p_theta_gyro + R_THETA_ODOM);
+            let k_theta_odom = self.p_theta_gyro / (self.p_theta_gyro + r_theta_odom);
             self.state.theta += k_theta_odom * (odom_delta.d_theta - mpu.d_theta);
             self.p_theta_gyro *= 1.0 - k_theta_odom;
         }
 
-        // Update from magnetometer (absolute heading — prevents gyro drift from accumulating)
+        // Update from magnetometer (absolute heading — corrects gyro drift over time).
+        // Hard iron calibration in mpu.rs makes relative_mag track actual heading.
+        // R_THETA_MAG is set high so motor-induced field changes during turns don't corrupt fusion;
+        // the correction is most effective during stationary phases between moves.
         let mut z_mag = mpu.relative_mag - self.state.theta;
         while z_mag > PI { z_mag -= 2.0 * PI; }
         while z_mag < -PI { z_mag += 2.0 * PI; }

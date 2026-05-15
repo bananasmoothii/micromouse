@@ -12,16 +12,18 @@ pub mod positioning;
 mod trajectory;
 pub mod utils;
 
-use crate::devices::battery::{start_battery_monitoring};
+use crate::devices::battery::start_battery_monitoring;
 use crate::devices::buzzer::buzzer_task;
 use crate::devices::hall_sensor_3144;
-use crate::devices::motors::{Motor, WheelSide, MIN_USABLE_SPEED};
+use crate::devices::motors::{MIN_USABLE_SPEED, Motor, WheelSide};
 use crate::devices::mpu9250::Mpu9250Sensor;
-use crate::positioning::{positioning_task, CURRENT_POS};
+use crate::positioning::{CURRENT_POS, positioning_task};
 use crate::trajectory::TrajectorySegment;
+use crate::trajectory::in_place_turn::InPlaceTurn;
 use crate::trajectory::straight_line::StraightLine;
 use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils};
 use alloc::boxed::Box;
+use alloc::vec;
 use alloc::vec::Vec;
 use defmt::*;
 use defmt_rtt as _;
@@ -203,8 +205,8 @@ async fn main(mut spawner: Spawner) {
         CountingMode::EdgeAlignedUp,
     );
 
-    let mut motor_left = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1, WheelSide::Left);
-    let mut motor_right = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3, WheelSide::Right);
+    let motor_left = Motor::new(p.PA8, p.PA9, pwm1, Channel::Ch1, WheelSide::Left);
+    let motor_right = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3, WheelSide::Right);
 
     // Start overcurrent protection
     spawner
@@ -251,17 +253,28 @@ async fn motor_tests(
     mut flash: Flash<'static, embassy_stm32::flash::Blocking>,
 ) {
     2.s_timer().await;
-    let trajectory = StraightLine {
-        distance: 2.0,
-        out_speed: MIN_USABLE_SPEED,
-    };
-    trajectory
-        .execute(&mut motor_left, &mut motor_right, Some(MIN_USABLE_SPEED))
-        .await;
-    motor_left.set_speed(0.0);
-    motor_right.set_speed(0.0);
-    // flash_log!("JHJJJJJJ");
-    2.s_timer().await;
+
+    let segments: Vec<Box<dyn TrajectorySegment>> = vec![
+        Box::new(StraightLine {
+            distance: 1.0,
+            out_speed: MIN_USABLE_SPEED,
+        }),
+        Box::new(InPlaceTurn::from_degrees(180.0)),
+        Box::new(StraightLine {
+            distance: 1.0,
+            out_speed: MIN_USABLE_SPEED,
+        }),
+    ];
+    for segment in &segments {
+        segment
+            .execute(&mut motor_left, &mut motor_right, Some(MIN_USABLE_SPEED))
+            .await;
+        motor_left.set_speed(0.0);
+        motor_right.set_speed(0.0);
+        200.ms_timer().await;
+    }
+
+    1.s_timer().await;
     flash_log::flush(&mut flash);
 
     /*
@@ -278,7 +291,6 @@ async fn motor_tests(
         motor_left.neutral();
         motor_right.neutral();
     */
-
 }
 
 /*

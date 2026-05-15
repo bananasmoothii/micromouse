@@ -6,7 +6,7 @@ use embassy_stm32::spi;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::spi::mode::Master;
 use embassy_time::Delay;
-use mpu9250::{Error, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice, SpiError};
+use mpu9250::{Error, GyroScale, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice, SpiError};
 use crate::utils::HertzUtils;
 
 // Note: interrupts don't seem to work with the MPU9250. However, each new read gives a new
@@ -26,7 +26,7 @@ impl Mpu9250Sensor {
             com,
             ncs,
             &mut Delay,
-            &mut MpuConfig::marg(),
+            &mut MpuConfig::marg().gyro_scale(GyroScale::_2000DPS),
             |mut spi, ncs| {
                 let mut new_spi_config = spi::Config::default();
                 new_spi_config.frequency = 16.mhz();

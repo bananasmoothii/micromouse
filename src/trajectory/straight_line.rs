@@ -1,10 +1,11 @@
+use alloc::boxed::Box;
 use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask};
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
 use crate::devices::motors::Motor;
 use crate::flash_log;
 use crate::positioning::CURRENT_POS;
 use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
-use crate::trajectory::{TrajectorySegment, UPDATE_INTERVAL_MS};
+use crate::trajectory::{FusionMode, FUSION_MODE, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode};
 use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils, MathUtils};
 use alloc::format;
 use core::sync::atomic::Ordering::Relaxed;
@@ -15,7 +16,7 @@ use futures_util::future::err;
 use core::f32::consts::PI;
 use micromath::F32Ext;
 
-const MAX_SPEED_M_S: f32 = 0.75;
+const MAX_SPEED_M_S: f32 = 1.25;
 
 // --- Speed controller: velocity-form (incremental) ---
 //
@@ -59,13 +60,19 @@ pub struct StraightLine {
     pub out_speed: f32,
 }
 
+#[async_trait::async_trait]
 impl TrajectorySegment for StraightLine {
+    fn fusion_mode(&self) -> FusionMode {
+        FusionMode::Straight
+    }
+
     async fn execute<'a>(
         &self,
         motor_left: &mut Motor<'a, TIM3>,
         motor_right: &mut Motor<'a, TIM2>,
         override_start_speed: Option<f32>,
     ) {
+        set_current_fusion_mode(FusionMode::Straight);
         let mut motors = Motors {
             motor_left,
             motor_right,
@@ -136,6 +143,7 @@ impl TrajectorySegment for StraightLine {
                     current_pos.v_forward - self.out_speed,
                 );
                 motors.set_speed(self.out_speed);
+                set_current_fusion_mode(FusionMode::Idle);
                 break;
             }
 
