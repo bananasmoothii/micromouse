@@ -27,7 +27,7 @@ pub async fn init_i2c_devices(
     interrupts: [ExtiInput<'static>; 3],
 ) {
     let mut i2c_config = Config::default();
-    // Use 100kHz for more reliable communication
+    // Use 100kHz for more reliable communication when we don't have pull-up resistors
     i2c_config.frequency = 150.khz();
     i2c_config.gpio_speed = Speed::High;
     i2c_config.timeout = Duration::from_millis(50);
