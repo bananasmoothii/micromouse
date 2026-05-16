@@ -5,8 +5,8 @@ use core::sync::atomic::Ordering;
 use micromath::F32Ext;
 
 /// Physical radius of the wheels in meters (tire included).
-/// Empirically derived: robot traveled 2.15 m for a 191-tick stop → r = 2.15×12/(2π×191) = 21.5 mm.
-pub const WHEEL_RADIUS: f32 = 0.0215;
+/// Actually empirically derived
+pub const WHEEL_RADIUS: f32 = 0.0228;
 
 /// Distance between the two differential wheels in meters (track width).
 pub const WHEEL_BASE: f32 = 0.078;

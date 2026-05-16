@@ -15,7 +15,7 @@ use core::sync::atomic::Ordering::Relaxed;
 use embassy_stm32::peripherals::{TIM2, TIM3};
 use micromath::F32Ext;
 
-const MAX_SPEED_M_S: f32 = 1.5;
+const MAX_SPEED_M_S: f32 = 1.0;
 
 // --- Speed controller: position-form PI ---
 //
@@ -45,13 +45,15 @@ const MAX_STEERING: f32 = 0.30;
 /// Requires the MIN_USABLE_PWM snap in motors.rs to be removed.
 const DECEL_MIN_SPEED: f32 = MIN_USABLE_SPEED / 2.0;
 
+const ACCELERATION: f32 = 2.0; // m/s²
+
 /// We need this to stop at a precise distance
-const DECELERATION_SPEED: f32 = 2.0;
+const DECELERATION: f32 = 2.5;
 
 /// when entering deceleration phase, apply this factor to I
 const DECEL_I_FACTOR: f32 = 0.4;
 
-const BRAKE_DISTANCE: f32 = 0.02;
+const BRAKE_DISTANCE: f32 = 0.00;
 
 static HEADING_INTEGRAL: AtomicU32 = AtomicU32::new(0f32.to_bits());
 
@@ -89,19 +91,18 @@ impl TrajectorySegment for StraightLine {
 
         // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
         let decel_distance_full_speed =
-            (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * DECELERATION_SPEED);
+            (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * DECELERATION);
         let (max_reachable_speed, decel_distance) = if decel_distance_full_speed <= self.distance {
             (MAX_SPEED_M_S, decel_distance_full_speed)
         } else {
             // v_max² = 2aΔx + v_final²    (with Δx = self.distance)
             (
-                (2.0 * DECELERATION_SPEED * self.distance + self.out_speed.square()).sqrt(),
+                (2.0 * DECELERATION * self.distance + self.out_speed.square()).sqrt(),
                 self.distance,
             )
         };
         let decel_start_distance = self.distance - decel_distance;
 
-        let mut target_speed = max_reachable_speed;
         let mut speed_integral = 0.0f32;
         let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
         let mut in_decel = false;
@@ -144,19 +145,27 @@ impl TrajectorySegment for StraightLine {
                 break;
             }
 
-            // Distance-based decel ramp: target_speed is a function of tick distance,
-            // so it always reaches out_speed at self.distance regardless of actual speed.
+            // Acceleration ramp: ramps from 0 up to max_reachable_speed using kinematics.
+            let accel_target = (MIN_USABLE_SPEED.square() + 2.0 * ACCELERATION * distance)
+                .sqrt()
+                .min(max_reachable_speed);
+
+            // Deceleration ramp: distance-based, always reaches out_speed at self.distance.
             // Integral resets once on decel entry to clear cruise windup.
-            if distance >= decel_start_distance {
+            // Deceleration always takes precedence (min of both ramps).
+            let decel_target = if distance >= decel_start_distance {
                 if !in_decel {
                     in_decel = true;
                     speed_integral *= DECEL_I_FACTOR;
                 }
-                target_speed = (max_reachable_speed
+                (max_reachable_speed
                     - (distance - decel_start_distance) * max_reachable_speed / decel_distance)
-                    .max(MIN_USABLE_SPEED); // floor at motor minimum; hard stop happens at tick target
-                // target_speed = MIN_USABLE_SPEED;
-            }
+                    .max(MIN_USABLE_SPEED)
+            } else {
+                f32::INFINITY
+            };
+
+            let target_speed = accel_target.min(decel_target);
 
             let speed_error = target_speed - current_pos.v_forward;
 

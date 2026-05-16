@@ -13,7 +13,7 @@ mod trajectory;
 pub mod utils;
 
 use crate::devices::battery::start_battery_monitoring;
-use crate::devices::buzzer::buzzer_task;
+use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, buzzer_task};
 use crate::devices::hall_sensor_3144;
 use crate::devices::motors::{MIN_USABLE_SPEED, Motor, WheelSide};
 use crate::devices::mpu9250::Mpu9250Sensor;
@@ -259,20 +259,35 @@ async fn motor_tests(
             distance: 1.0,
             out_speed: 0.0,
         }),
-        // Box::new(InPlaceTurn::from_degrees(180.0)),
-        // Box::new(StraightLine {
-        //     distance: 1.0,
-        //     out_speed: MIN_USABLE_SPEED,
-        // }),
+        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        Box::new(StraightLine {
+            distance: 1.0,
+            out_speed: 0.0,
+        }),
+        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        Box::new(StraightLine {
+            distance: 1.0,
+            out_speed: 0.0,
+        }),
+        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        Box::new(StraightLine {
+            distance: 1.0,
+            out_speed: 0.0,
+        }),
+        Box::new(InPlaceTurn::from_degrees(-90.0)),
     ];
     for segment in &segments {
-        segment
-            .execute(&mut motor_left, &mut motor_right)
-            .await;
+        segment.execute(&mut motor_left, &mut motor_right).await;
         motor_left.set_speed(0.0);
         motor_right.set_speed(0.0);
         200.ms_timer().await;
     }
+    BUZZER_CHANNEL
+        .send(BuzzerTask {
+            freq: 1047.hz(),
+            duration: 500.ms(),
+        })
+        .await;
 
     1.s_timer().await;
     flash_log::flush(&mut flash);
