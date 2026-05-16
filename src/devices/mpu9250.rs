@@ -1,13 +1,13 @@
+use crate::utils::HertzUtils;
 use core::convert::Infallible;
 use defmt::{error, info};
 use embassy_stm32::gpio::Output;
-use embassy_stm32::mode::Async;
+use embassy_stm32::mode::{Async, Blocking};
 use embassy_stm32::spi;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::spi::mode::Master;
 use embassy_time::Delay;
 use mpu9250::{Error, GyroScale, Marg, MargMeasurements, Mpu9250, MpuConfig, SpiDevice, SpiError};
-use crate::utils::HertzUtils;
 
 // Note: interrupts don't seem to work with the MPU9250. However, each new read gives a new
 // measurement, even if reading as fast as possible.
@@ -29,6 +29,12 @@ impl Mpu9250Sensor {
             &mut MpuConfig::marg().gyro_scale(GyroScale::_2000DPS),
             |mut spi, ncs| {
                 let mut new_spi_config = spi::Config::default();
+                // MPU9250 library requires Mode 3 (CPOL=1, CPHA=1)
+                // This matches mpu9250::MODE constant: IdleHigh, CaptureOnSecondTransition
+                new_spi_config.mode = spi::Mode {
+                    polarity: spi::Polarity::IdleHigh,
+                    phase: spi::Phase::CaptureOnSecondTransition,
+                };
                 new_spi_config.frequency = 16.mhz();
                 spi.set_config(&new_spi_config).ok().map(|_| (spi, ncs))
             },

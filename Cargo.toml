@@ -36,14 +36,16 @@ usbd-hid = "0.9.0"
 static_cell = "2"
 chrono = { version = "^0.4", default-features = false }
 
-# vl53l1 = { git = "https://github.com/trung1-dothanh/vl53l1", rev = "26745b652e7c8aad1c03319e32b8552889bf6fbe" } # version that uses embedded-hal 1.0, update when new version is released
 vl53l1 = { git = "https://github.com/bananasmoothii/vl53l1", features = ["defmt"], branch = "i2c_address_changing" }
 vl53l0x = { git = "https://github.com/bananasmoothii/vl53l0x", rev = "afb05560", features = ["defmt"] }
 
 mpu9250 = { git = "https://github.com/bananasmoothii/mpu9250-forked", rev = "4bc31c80", features = ["defmt"] }
 
-[profile.release]
-debug = 2
+[profile.release.package.embassy-stm32]
+opt-level = 1 # https://github.com/embassy-rs/embassy/issues/6129
+
+[profile.dev]
+opt-level = "z"
 
 [package.metadata.embassy]
 build = [

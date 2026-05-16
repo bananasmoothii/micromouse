@@ -149,7 +149,7 @@ async fn main(mut spawner: Spawner) {
     );
 
     info!("Setting up chip select (CS)...");
-    let mut chip_select = Output::new(p.PC12, Level::High, Speed::Low);
+    let mut chip_select = Output::new(p.PC12, Level::High, Speed::High);
     // let interrupt = ExtiInput::new(p.PA2, p.EXTI2, Pull::None, Irqs);
 
     // MPU9250 requires CS to be high during power-on to enable SPI mode
@@ -213,9 +213,9 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-    // spawner
-    //     .spawn(motor_tests(motor_left, motor_right, flash))
-    //     .unwrap();
+    spawner
+        .spawn(motor_tests(motor_left, motor_right, flash))
+        .unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
