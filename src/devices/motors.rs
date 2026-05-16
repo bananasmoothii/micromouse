@@ -17,8 +17,8 @@ pub enum WheelSide {
     Right,
 }
 
-const LEFT_WHEEL_SPEED_FACTOR: f32 = 0.95;
-const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.05;
+const LEFT_WHEEL_SPEED_FACTOR: f32 = 0.98;
+const RIGHT_WHEEL_SPEED_FACTOR: f32 = 1.02;
 
 /// PWM duty cycle → m/s, measured at CALIBRATION_VOLTAGE.
 /// VERY EMPIRICAL - might depend on the battery, the floor, the mood of the robot...
@@ -63,17 +63,13 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
     pub fn set_pwm(&mut self, mut duty_cycle: f32) {
         assert!(
             -1.0 <= duty_cycle && duty_cycle <= 1.0,
-            "Speed must be between -1.0 and 1.0"
+            "PWM duty cycle must be between -1.0 and 1.0"
         );
 
         if duty_cycle == 0.0 {
             self.brake();
             return;
         }
-        if duty_cycle.abs() < MIN_USABLE_PWM {
-            duty_cycle = if duty_cycle > 0.0 { MIN_USABLE_PWM } else { -MIN_USABLE_PWM };
-        }
-
         let (actual_speed, forward_flag) = match self.side {
             WheelSide::Left => (duty_cycle * LEFT_WHEEL_SPEED_FACTOR, &LEFT_FORWARD),
             WheelSide::Right => (duty_cycle * RIGHT_WHEEL_SPEED_FACTOR, &RIGHT_FORWARD),
@@ -107,9 +103,12 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
     pub fn brake(&mut self) {
         self.in_a.set_high();
         self.in_b.set_high();
+        let duty = (self.pwm.max_duty_cycle() as f32 * 0.25) as u32;
         let mut pwm_channel = self.pwm.channel(self.pwm_channel);
-        pwm_channel.disable();
-        pwm_channel.set_duty_cycle(0);
+        pwm_channel.set_duty_cycle(duty);
+        if !pwm_channel.is_enabled() {
+            pwm_channel.enable();
+        }
     }
 
     pub fn neutral(&mut self) {

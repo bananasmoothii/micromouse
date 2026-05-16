@@ -42,5 +42,5 @@ pub fn set_current_fusion_mode(mode: FusionMode) {
 pub trait TrajectorySegment {
     fn fusion_mode(&self) -> FusionMode;
 
-    async fn execute<'a>(&self, motor_left: &mut Motor<'a, TIM3>, motor_right: &mut Motor<'a, TIM2>, override_start_speed: Option<f32>);
+    async fn execute<'a>(&self, motor_left: &mut Motor<'a, TIM3>, motor_right: &mut Motor<'a, TIM2>);
 }

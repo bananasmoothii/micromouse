@@ -1,55 +1,59 @@
-use alloc::boxed::Box;
-use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask};
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
-use crate::devices::motors::Motor;
+use crate::devices::motors::{MIN_USABLE_SPEED, Motor};
 use crate::flash_log;
 use crate::positioning::CURRENT_POS;
 use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
-use crate::trajectory::{FusionMode, FUSION_MODE, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode};
+use crate::trajectory::{
+    FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode,
+};
 use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils, MathUtils};
+use alloc::boxed::Box;
 use alloc::format;
-use core::sync::atomic::Ordering::Relaxed;
-use core::sync::atomic::{AtomicI32, AtomicU32};
-use defmt::{debug, info, trace};
-use embassy_stm32::peripherals::{TIM1, TIM2, TIM3};
-use futures_util::future::err;
 use core::f32::consts::PI;
+use core::sync::atomic::AtomicU32;
+use core::sync::atomic::Ordering::Relaxed;
+use embassy_stm32::peripherals::{TIM2, TIM3};
 use micromath::F32Ext;
 
-const MAX_SPEED_M_S: f32 = 1.25;
+const MAX_SPEED_M_S: f32 = 1.5;
 
-// --- Speed controller: velocity-form (incremental) ---
+// --- Speed controller: position-form PI ---
 //
-// This is NOT a standard position-form PI (commanded = KP*e + KI*∫e).
-// Instead it uses the velocity form: commanded_speed accumulates a small increment each step:
+//   commanded_speed = KP * error + KI * integral(error)
 //
-//   commanded_speed += KP * clamp(error)
+// The integral eliminates steady-state speed error: if the motor consistently runs slower
+// than commanded (due to friction or motor variability), the integral winds up until the
+// commanded speed is high enough to close the gap. Anti-windup clamps the integral so it
+// cannot contribute more than MAX_SPEED_M_S on its own.
 //
-// What this means:
-//   - commanded_speed is itself the integrator. It holds the PWM level that was working last
-//     step and nudges it up or down based on current error. It never resets.
-//   - This gives natural "motor memory": if the robot reaches target speed and error → 0,
-//     commanded_speed stays at whatever PWM level achieved that, with no windup or jump.
-//   - Warm-start between segments works for free: commanded_speed carries over from the
-//     previous maneuver, so back-to-back segments don't lurch.
-//   - There is no separate KI term. Adding one would double-integrate the error (integral of
-//     an integral) and cause instability. The accumulation IS the integral action.
-//   - The MAX_P clamp limits how aggressively a single noisy sample can move commanded_speed,
-//     acting as a rate limiter against the quantized velocity signal.
-//
-// Tune KP: raise until commanded_speed oscillates visibly in the log, then back off ~30%.
-const KP: f32 = 0.13;
-const MAX_P: f32 = 0.1; // max commanded_speed change per 20 ms step (m/s)
+// Tune KP first (set KI=0): raise until speed tracks target with minimal lag, back off if it
+// oscillates. Then raise KI until steady-state error disappears.
+const KP: f32 = 0.5;
+const KI: f32 = 9.0;
+
+/// KI * integral cap
+const MAX_INTEGRAL_CONTRIB: f32 = MAX_SPEED_M_S;
 
 /// Straight-line heading PI: keeps the robot on its initial bearing.
 /// Negated because CW rotation (right turn) increases theta on this hardware (gyro z-axis down).
-const KP_STRAIGHT: f32 = 0.8;
-const KI_STRAIGHT: f32 = 0.3; // (m/s) per (rad·s) of accumulated heading error
-const MAX_HEADING_INTEGRAL: f32 = 0.1; // caps integral wind-up at ~±0.1 m/s authority
-const MAX_STEERING: f32 = 0.15;
+const KP_STEERING: f32 = 0.4;
+const KI_STEERING: f32 = 1.5; // (m/s) per (rad·s) of accumulated heading error
+const MAX_STEERING_INTEGRAL: f32 = 0.1; // caps integral wind-up at ~±0.1 m/s authority
+const MAX_STEERING: f32 = 0.30;
+
+/// Minimum commanded speed during deceleration — lower than MIN_USABLE_SPEED so friction dominates.
+/// Requires the MIN_USABLE_PWM snap in motors.rs to be removed.
+const DECEL_MIN_SPEED: f32 = MIN_USABLE_SPEED / 2.0;
 
 /// We need this to stop at a precise distance
-const DECELERATION_SPEED: f32 = 0.8;
+const DECELERATION_SPEED: f32 = 2.0;
+
+/// when entering deceleration phase, apply this factor to I
+const DECEL_I_FACTOR: f32 = 0.4;
+
+const BRAKE_DISTANCE: f32 = 0.02;
+
+static HEADING_INTEGRAL: AtomicU32 = AtomicU32::new(0f32.to_bits());
 
 /// Accelerates to max speed (if possible), maintains it, then decelerates.
 /// Acceleration is done purely through PI control, deceleration is commanded gradually (still
@@ -70,7 +74,6 @@ impl TrajectorySegment for StraightLine {
         &self,
         motor_left: &mut Motor<'a, TIM3>,
         motor_right: &mut Motor<'a, TIM2>,
-        override_start_speed: Option<f32>,
     ) {
         set_current_fusion_mode(FusionMode::Straight);
         let mut motors = Motors {
@@ -83,9 +86,6 @@ impl TrajectorySegment for StraightLine {
         let left_ticks_start = LEFT_TICKS_CUMULATIVE.load(Relaxed);
         let right_ticks_start = RIGHT_TICKS_CUMULATIVE.load(Relaxed);
         let target_ticks = (self.distance / DISTANCE_PER_TICK).round() as i32;
-        let start_speed = override_start_speed
-            .unwrap_or(start_pos.v_forward)
-            .clamp(-MAX_SPEED_M_S, MAX_SPEED_M_S);
 
         // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
         let decel_distance_full_speed =
@@ -102,8 +102,9 @@ impl TrajectorySegment for StraightLine {
         let decel_start_distance = self.distance - decel_distance;
 
         let mut target_speed = max_reachable_speed;
-        let mut commanded_speed = start_speed;
-        let mut heading_integral = 0.0f32;
+        let mut speed_integral = 0.0f32;
+        let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
+        let mut in_decel = false;
 
         loop {
             let current_pos = CURRENT_POS.get();
@@ -115,25 +116,20 @@ impl TrajectorySegment for StraightLine {
             // Heading error: how much the robot has rotated from its initial direction.
             // Normalized to ±π so wrap-around near ±180° doesn't produce spurious corrections.
             let mut heading_error = current_pos.theta - initial_theta;
-            if heading_error > PI { heading_error -= 2.0 * PI; }
-            if heading_error < -PI { heading_error += 2.0 * PI; }
-            heading_integral = (heading_integral + heading_error * (UPDATE_INTERVAL_MS as f32 / 1000.0))
-                .clamp(-MAX_HEADING_INTEGRAL, MAX_HEADING_INTEGRAL);
-            let steering = (-(KP_STRAIGHT * heading_error + KI_STRAIGHT * heading_integral))
-                .clamp(-MAX_STEERING, MAX_STEERING);
-
-            let speed_error = target_speed - current_pos.v_forward;
+            if heading_error > PI {
+                heading_error -= 2.0 * PI;
+            }
+            if heading_error < -PI {
+                heading_error += 2.0 * PI;
+            }
+            heading_integral = (heading_integral
+                + heading_error * (UPDATE_INTERVAL_MS as f32 / 1000.0))
+                .clamp(-MAX_STEERING_INTEGRAL, MAX_STEERING_INTEGRAL);
+            let steer_p = -(KP_STEERING * heading_error);
+            let steer_i = -(KI_STEERING * heading_integral);
+            let steering = (steer_p + steer_i).clamp(-MAX_STEERING, MAX_STEERING);
 
             if avg_ticks >= target_ticks {
-                flash_log!(
-                    "StraightLine ({}/{}m): target: {}, current: {}, error: {}, commanded: {}, P: 0.0000, I: 0.0000, steer: 0.0000",
-                    format!("{:.2}", distance).as_str(),
-                    format!("{:.2}", self.distance).as_str(),
-                    format!("{:.2}", target_speed).as_str(),
-                    format!("{:.2}", current_pos.v_forward).as_str(),
-                    format!("{:.2}", speed_error).as_str(),
-                    format!("{:.2}", commanded_speed).as_str(),
-                );
                 flash_log!(
                     "Distance reached: left {} ticks ({} turns), right {} ticks ({} turns), speed error: {}",
                     left_ticks,
@@ -143,42 +139,64 @@ impl TrajectorySegment for StraightLine {
                     current_pos.v_forward - self.out_speed,
                 );
                 motors.set_speed(self.out_speed);
-                set_current_fusion_mode(FusionMode::Idle);
+                // keep straight in case out_speed != 0
+                // set_current_fusion_mode(FusionMode::Idle);
                 break;
             }
 
-            // update target speed
+            // Distance-based decel ramp: target_speed is a function of tick distance,
+            // so it always reaches out_speed at self.distance regardless of actual speed.
+            // Integral resets once on decel entry to clear cruise windup.
             if distance >= decel_start_distance {
-                target_speed -= DECELERATION_SPEED * (UPDATE_INTERVAL_MS as f32 / 1000.0);
+                if !in_decel {
+                    in_decel = true;
+                    speed_integral *= DECEL_I_FACTOR;
+                }
+                target_speed = (max_reachable_speed
+                    - (distance - decel_start_distance) * max_reachable_speed / decel_distance)
+                    .max(MIN_USABLE_SPEED); // floor at motor minimum; hard stop happens at tick target
+                // target_speed = MIN_USABLE_SPEED;
             }
 
-            let increment = (KP * speed_error).clamp(-MAX_P, MAX_P);
-            commanded_speed = (commanded_speed + increment)
-                .clamp(-1.5 * MAX_SPEED_M_S, 1.5 * MAX_SPEED_M_S);
+            let speed_error = target_speed - current_pos.v_forward;
+
+            speed_integral = (speed_integral + speed_error * (UPDATE_INTERVAL_MS as f32 / 1000.0))
+                .clamp(-MAX_INTEGRAL_CONTRIB / KI, MAX_INTEGRAL_CONTRIB / KI);
+            let p = KP * speed_error;
+            let i = KI * speed_integral;
+
+            let in_brake = self.distance - distance <= BRAKE_DISTANCE;
+            let sign = self.distance.signum();
+            let pi_out = p + i;
+            let min_speed = if in_decel { DECEL_MIN_SPEED } else { MIN_USABLE_SPEED };
+            let commanded_speed = if in_brake {
+                0.0
+            } else {
+                pi_out.clamp(sign * min_speed, sign * 1.5 * MAX_SPEED_M_S)
+            };
+            let active_steering = if in_brake { 0.0 } else { steering };
             flash_log!(
-                "StraightLine ({}/{}m): target: {}, current: {}, error: {}, commanded: {}, incr: {}, steer: {}, hdg: {}deg",
+                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, hdg: {}deg",
                 format!("{:.2}", distance).as_str(),
                 format!("{:.2}", self.distance).as_str(),
                 format!("{:.2}", target_speed).as_str(),
+                if in_decel { " (decel)" } else { "" },
                 format!("{:.2}", current_pos.v_forward).as_str(),
                 format!("{:.2}", speed_error).as_str(),
                 format!("{:.2}", commanded_speed).as_str(),
-                format!("{:.4}", increment).as_str(),
-                format!("{:.4}", steering).as_str(),
+                format!("{:.4}", p).as_str(),
+                format!("{:.4}", i).as_str(),
+                format!("{:.4}", active_steering).as_str(),
+                format!("{:.4}", steer_p).as_str(),
+                format!("{:.4}", steer_i).as_str(),
                 format!("{:.1}", heading_error.to_degrees()).as_str(),
             );
 
-            motors.set_speed_steered(commanded_speed, steering);
-
-            if speed_error < 0.0 && target_speed < max_reachable_speed {
-                let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
-                    freq: 2000.hz(),
-                    duration: 20.ms(),
-                });
-            }
+            motors.set_speed_steered(commanded_speed, active_steering);
 
             UPDATE_INTERVAL_MS.ms_timer().await;
         }
+        HEADING_INTEGRAL.store(heading_integral.to_bits(), Relaxed);
     }
 }
 

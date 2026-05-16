@@ -257,17 +257,17 @@ async fn motor_tests(
     let segments: Vec<Box<dyn TrajectorySegment>> = vec![
         Box::new(StraightLine {
             distance: 1.0,
-            out_speed: MIN_USABLE_SPEED,
+            out_speed: 0.0,
         }),
-        Box::new(InPlaceTurn::from_degrees(180.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: MIN_USABLE_SPEED,
-        }),
+        // Box::new(InPlaceTurn::from_degrees(180.0)),
+        // Box::new(StraightLine {
+        //     distance: 1.0,
+        //     out_speed: MIN_USABLE_SPEED,
+        // }),
     ];
     for segment in &segments {
         segment
-            .execute(&mut motor_left, &mut motor_right, Some(MIN_USABLE_SPEED))
+            .execute(&mut motor_left, &mut motor_right)
             .await;
         motor_left.set_speed(0.0);
         motor_right.set_speed(0.0);

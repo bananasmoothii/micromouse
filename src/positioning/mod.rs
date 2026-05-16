@@ -74,13 +74,7 @@ pub async fn positioning_task(mpu: &'static mut Mpu9250Sensor) {
         let state = fusion_proc.update(odom_delta, mpu_result, mode);
         CURRENT_POS.set(state);
 
-        flash_log!(
-            "Fusion: gyro_d {}deg, odom_d {}deg, mag {}deg, theta {}deg",
-            format!("{:.3}", gyro_d_deg).as_str(),
-            format!("{:.3}", odom_d_deg).as_str(),
-            format!("{:.2}", mag_deg).as_str(),
-            format!("{:.2}", state.theta.to_degrees()).as_str(),
-        );
+        flash_log!("Fusion: {}", state);
 
         20.ms_timer().await;
     }

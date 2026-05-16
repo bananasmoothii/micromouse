@@ -1,5 +1,6 @@
 use micromath::F32Ext;
 use alloc::format;
+use core::fmt::{Display, Formatter};
 use defmt::Format;
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -28,6 +29,19 @@ impl Format for PositionState {
             format!("{:.1}", self.theta.to_degrees()).as_str(),
             format!("{:.2}", self.v_forward).as_str()
         );
+    }
+}
+
+impl Display for PositionState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "x: {} y: {} theta: {}° v: {}",
+            format!("{:.2}", self.x).as_str(),
+            format!("{:.2}", self.y).as_str(),
+            format!("{:.1}", self.theta.to_degrees()).as_str(),
+            format!("{:.2}", self.v_forward).as_str()
+        )
     }
 }
 

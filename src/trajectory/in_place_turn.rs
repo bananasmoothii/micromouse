@@ -28,9 +28,9 @@ const APPROACH_SPEED: f32 = 0.5;  // gentler final approach; less inertia at mot
 const FINAL_ZONE_RAD: f32 = 30f32.to_radians();
 
 // Empirical angular deceleration after motor cut (Coulomb friction model: coast = ω²/2α).
-// Measured from log: at ω≈19.6 rad/s, coast≈22.4° (0.391 rad) → α = 19.6²/(2×0.391) ≈ 490.
+// Measured from log: at ω≈19.7 rad/s, coast≈12.4° (0.217 rad) → α = 19.7²/(2×0.217) ≈ 894.
 // Tune this constant if the floor changes: overshoot → raise α, undershoot → lower α.
-const FRICTION_DECEL: f32 = 490.0; // rad/s²
+const FRICTION_DECEL: f32 = 900.0; // rad/s²
 
 // Minimum cut-early angle used when ω is near zero (avoids never stopping).
 const DONE_THRESHOLD_MIN_RAD: f32 = 3f32.to_radians();
@@ -60,7 +60,6 @@ impl TrajectorySegment for InPlaceTurn {
         &self,
         motor_left: &mut Motor<'a, TIM3>,
         motor_right: &mut Motor<'a, TIM2>,
-        _override_start_speed: Option<f32>,
     ) {
         set_current_fusion_mode(FusionMode::Pivot);
         let start_pos = CURRENT_POS.get();
