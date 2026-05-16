@@ -3,7 +3,6 @@
 extern crate alloc;
 
 mod devices;
-pub mod dimensions;
 mod flash_log;
 mod i2c_devices;
 mod labyrinth;
@@ -42,6 +41,7 @@ use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
 use embassy_time::Instant;
 use embedded_alloc::LlffHeap as Heap;
+use crate::i2c_devices::init_i2c_devices;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -104,33 +104,27 @@ async fn main(mut spawner: Spawner) {
     let mut flash = Flash::new_blocking(p.FLASH);
     flash_log::startup_dump(&mut flash);
 
-    /*
     // TODO: add pull-up resistors to SDA and SCL
-       init_i2c_devices(
-           &mut spawner,
-           p.I2C1,
-           p.PB8,
-           p.PB9,
-           p.DMA1_CH6,
-           p.DMA1_CH0,
-           Irqs,
-           [
-               Output::new(p.PB7, Level::Low, Speed::Low),
-               Output::new(p.PB2, Level::Low, Speed::Low),
-               Output::new(p.PB12, Level::Low, Speed::Low),
-           ],
-           [
-               ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
-               ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
-               ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
-           ],
-       )
-           .await;
-
-    */
-
-    // Start Positioning task
-    // spawner.spawn(positioning_task()).unwrap();
+    init_i2c_devices(
+        &mut spawner,
+        p.I2C1,
+        p.PB8,
+        p.PB9,
+        p.DMA1_CH6,
+        p.DMA1_CH0,
+        Irqs,
+        [
+            Output::new(p.PB7, Level::Low, Speed::Low),
+            Output::new(p.PB2, Level::Low, Speed::Low),
+            Output::new(p.PB12, Level::Low, Speed::Low),
+        ],
+        [
+            ExtiInput::new(p.PC5, p.EXTI5, Pull::Up, Irqs),
+            ExtiInput::new(p.PC6, p.EXTI6, Pull::Up, Irqs),
+            ExtiInput::new(p.PC8, p.EXTI8, Pull::Up, Irqs),
+        ],
+    )
+        .await;
 
     info!("Configuring SPI...");
     let mut spi_config = spi::Config::default();
@@ -219,9 +213,9 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-    spawner
-        .spawn(motor_tests(motor_left, motor_right, flash))
-        .unwrap();
+    // spawner
+    //     .spawn(motor_tests(motor_left, motor_right, flash))
+    //     .unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
