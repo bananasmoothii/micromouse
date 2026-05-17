@@ -3,6 +3,7 @@
 extern crate alloc;
 
 mod devices;
+mod dimensions;
 mod flash_log;
 mod i2c_devices;
 mod labyrinth;
@@ -253,22 +254,22 @@ async fn motor_tests(
             distance: 1.0,
             out_speed: 0.0,
         }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     distance: 1.0,
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     distance: 1.0,
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     distance: 1.0,
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
     ];
     for segment in &segments {
         segment.execute(&mut motor_left, &mut motor_right).await;
@@ -355,15 +356,18 @@ async fn maze_runner_task() -> ! {
             2 => (-1, 0),
             _ => (0, -1),
         };
-        while let Ok(data) = VL53L1X_MIDDLE_CHANNEL.try_receive() {
-            let wall = data.get_distance_mm() < 90;
-            let nx = (cx as isize + dx) as usize;
-            let ny = (cy as isize + dy) as usize;
-            if nx < 16 && ny < 16 {
-                if dx != 0 {
-                    lab.ray_east_wall(if dx > 0 { cx } else { nx }, cy, wall);
-                } else {
-                    lab.ray_south_wall(cx, if dy > 0 { cy } else { ny }, wall);
+        if let Some(snap) = VL53L1X_MIDDLE_WATCH.receiver().and_then(|mut r| r.try_get()) {
+            // Treat stale snapshots as no observation.
+            if snap.at.elapsed() < embassy_time::Duration::from_millis(200) {
+                let wall = snap.data.get_distance_mm() < 90;
+                let nx = (cx as isize + dx) as usize;
+                let ny = (cy as isize + dy) as usize;
+                if nx < 16 && ny < 16 {
+                    if dx != 0 {
+                        lab.ray_east_wall(if dx > 0 { cx } else { nx }, cy, wall);
+                    } else {
+                        lab.ray_south_wall(cx, if dy > 0 { cy } else { ny }, wall);
+                    }
                 }
             }
         }

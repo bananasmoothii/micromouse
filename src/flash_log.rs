@@ -19,6 +19,10 @@ use defmt::{info, println};
 use embassy_stm32::flash::{Blocking, Flash};
 use embassy_time::Instant;
 
+/// Master switch.  When `false`: `flash_log!` is a no-op (no RTT print, no RAM buffer write),
+/// and `startup_dump`/`flush` return immediately without touching flash.
+pub const ENABLED: bool = false;
+
 const SECTOR_OFFSET: u32 = 0x0006_0000; // sector 7 start, relative to flash base
 const SECTOR_SIZE: u32 = 128 * 1024;
 const FLASH_BASE: u32 = 0x0800_0000;
@@ -84,6 +88,10 @@ pub fn write_fmt(args: core::fmt::Arguments) {
 /// so accidental power-on will never wipe unread data.
 /// Call once at the top of `main` before spawning tasks.
 pub fn startup_dump(flash: &mut Flash<'_, Blocking>) {
+    if !ENABLED {
+        let _ = flash;
+        return;
+    }
     // Flash is memory-mapped; read via volatile pointer — safe for data (not instruction) reads.
     let base = (FLASH_BASE + SECTOR_OFFSET) as *const u8;
     let magic = unsafe { core::slice::from_raw_parts(base, 4) };
@@ -125,6 +133,10 @@ pub fn startup_dump(flash: &mut Flash<'_, Blocking>) {
 /// Write the RAM buffer to flash.  Call after the run (motors stopped, robot still powered).
 /// Erases the sector first (~1–4 s), then writes; signals completion via RTT.
 pub fn flush(flash: &mut Flash<'_, Blocking>) {
+    if !ENABLED {
+        let _ = flash;
+        return;
+    }
     let len = RAM_LEN.load(Ordering::Relaxed);
     if len == 0 {
         return;
@@ -144,7 +156,9 @@ pub fn flush(flash: &mut Flash<'_, Blocking>) {
 #[macro_export]
 macro_rules! flash_log {
     ($($arg:tt)*) => {{
-        defmt::println!($($arg)*);
-        $crate::flash_log::write_fmt(format_args!($($arg)*))
+        if $crate::flash_log::ENABLED {
+            defmt::println!($($arg)*);
+            $crate::flash_log::write_fmt(format_args!($($arg)*));
+        }
     }};
 }

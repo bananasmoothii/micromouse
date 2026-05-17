@@ -10,16 +10,22 @@ use embassy_stm32::mode::Async;
 use embassy_stm32::pac::interrupt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, TimeoutError, Timer};
+use embassy_sync::watch::Watch;
+use embassy_time::{Duration, Instant, TimeoutError, Timer};
+use embedded_hal::i2c::I2c as _;
 use embedded_hal_bus::i2c::RefCellDevice;
 use futures_util::future::select_all;
-use vl53l1::*;
-use embedded_hal::i2c::I2c as _;
-use vl53l1::RangeStatus::SIGNAL_FAIL;
+use vl53l1::RangeStatus::{RANGE_VALID, SIGNAL_FAIL};
 use vl53l1::*;
 
 pub static VL53L1X_CHANNEL: Channel<CriticalSectionRawMutex, RangingMeasurementData, 4> =
     Channel::new();
+
+/// Exponential moving average factor applied to the affine-corrected distance before publish:
+/// `filt = α · new + (1-α) · prev`. α=0.5 gives ~30% noise reduction and ~1-sample (~70 ms)
+/// lag — roughly 2 cm at 0.3 m/s, acceptable for wall-follow. Reset on invalid readings so a
+/// recovery doesn't smear stale data into fresh samples.
+const EMA_ALPHA: f32 = 0.5;
 
 pub struct VL53L1XSensor {
     device: Device,
@@ -28,19 +34,38 @@ pub struct VL53L1XSensor {
     last_data: RangingMeasurementData,
     gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
     xshut_pin: Output<'static>,
+    /// Per-sensor affine correction applied to `range_milli_meter` before the value is published
+    /// or stored in `last_data`. `corrected = (raw as f32) * slope + offset_mm`, rounded.
+    /// Defaults to (1.0, 0.0) = no-op. Tune from bench measurements at 2+ known distances.
+    pub slope: f32,
+    pub offset_mm: f32,
+    /// EMA filter state in mm (post affine correction). `None` = no prior sample; next valid
+    /// reading seeds the filter directly without blending.
+    filtered_mm: Option<f32>,
 }
 
 // I hate not being able to use generics due to the embassy task
 type I = RefCellDevice<'static, I2c<'static, Async, Master>>;
 type E = i2c::Error;
-type Channel1 = Channel<CriticalSectionRawMutex, RangingMeasurementData, 4>;
 
-/// right sensor looking 45° to the left
-pub static VL53L1X_45D_LEFT_CHANNEL: Channel1 = Channel::new();
-/// Sensor looking straight forward
-pub static VL53L1X_MIDDLE_CHANNEL: Channel1 = Channel::new();
-/// left sensor looking 45° to the right
-pub static VL53L1X_45D_RIGHT_CHANNEL: Channel1 = Channel::new();
+/// Latest distance reading plus the time it was captured. Consumers should treat readings as
+/// stale once their `at` timestamp is more than a few sensor periods old (~200 ms).
+#[derive(Clone)]
+pub struct DistanceSnapshot {
+    pub data: RangingMeasurementData,
+    pub at: Instant,
+}
+
+/// `N` = max number of concurrent receivers.
+/// Currently: positioning_task, straight_line wall-follow, main maze-runner, future wall-mapper → 4.
+type DistWatch = Watch<CriticalSectionRawMutex, DistanceSnapshot, 4>;
+
+/// Sensor looking 45° to the left (mounted on the right side of the robot, crossed).
+pub static VL53L1X_45D_LEFT_WATCH: DistWatch = Watch::new();
+/// Sensor looking straight forward (mounted on the centerline of the robot).
+pub static VL53L1X_MIDDLE_WATCH: DistWatch = Watch::new();
+/// Sensor looking 45° to the right (mounted on the left side of the robot, crossed).
+pub static VL53L1X_45D_RIGHT_WATCH: DistWatch = Watch::new();
 
 impl VL53L1XSensor {
     pub(crate) async fn init_new(
@@ -67,6 +92,9 @@ impl VL53L1XSensor {
             last_data: RangingMeasurementData::default(),
             gpio_interrupt: config.gpio_interrupt,
             xshut_pin: config.xshut_pin,
+            slope: 1.0,
+            offset_mm: 0.0,
+            filtered_mm: None,
         };
 
         self_.reinit_no_xshut(false)?;
@@ -82,6 +110,7 @@ impl VL53L1XSensor {
         self.xshut_pin.set_high();
         10.ms_timer().await;
 
+        self.filtered_mm = None;
         self.reinit_no_xshut(true)?;
 
         info!("Recovery complete for {:#x}", self.address);
@@ -141,10 +170,11 @@ impl VL53L1XSensor {
         set_user_roi(
             &mut self.device,
             UserRoi {
-                top_left_x: 0,
-                top_left_y: 15,
-                bot_right_x: 15,
-                bot_right_y: 0,
+                // 6x6 centered region
+                top_left_x: 5,
+                bot_right_y: 5,
+                bot_right_x: 10,
+                top_left_y: 10,
             },
         )?;
 
@@ -187,25 +217,25 @@ pub async fn distance_sensor_task(
                 sensor_45d_left.gpio_interrupt.wait_for_low(),
             ),
         )
-            .await;
+        .await;
 
         let sensor: &mut VL53L1XSensor;
-        let channel: &Channel1;
+        let watch: &DistWatch;
         let timeout: bool;
         match either3 {
             Either3::First(timeout_result) => {
                 sensor = &mut sensor_45d_right;
-                channel = &VL53L1X_45D_RIGHT_CHANNEL;
+                watch = &VL53L1X_45D_RIGHT_WATCH;
                 timeout = timeout_result.is_err();
             }
             Either3::Second(timeout_result) => {
                 sensor = &mut sensor_middle;
-                channel = &VL53L1X_MIDDLE_CHANNEL;
+                watch = &VL53L1X_MIDDLE_WATCH;
                 timeout = timeout_result.is_err();
             }
             Either3::Third(timeout_result) => {
                 sensor = &mut sensor_45d_left;
-                channel = &VL53L1X_45D_LEFT_CHANNEL;
+                watch = &VL53L1X_45D_LEFT_WATCH;
                 timeout = timeout_result.is_err();
             }
         }
@@ -216,18 +246,44 @@ pub async fn distance_sensor_task(
 
         // Get the ranging measurement data
         match get_ranging_measurement_data(&mut sensor.device, &mut sensor.i2c) {
-            Ok(data) => {
-                let wrapped_data = RangingMeasurementData(data);
-                sensor.last_data = wrapped_data.clone();
-                /*                trace!(
-                                    "VL53L1X {:#x} read: {} mm, σ={} mm, {}",
-                                    sensor.device.address(),
-                                    wrapped_data.get_distance_mm(),
-                                    wrapped_data.get_sigma_mm(),
-                                    wrapped_data.get_status(),
-                                );
-                */                let _ = channel.try_send(wrapped_data);
-                if let Err(e) = vl53l1::clear_interrupt(&mut sensor.device, &mut sensor.i2c) {
+            Ok(mut data) => {
+                let raw = data.range_milli_meter;
+                let status = data.range_status;
+
+                // Drop invalid readings before touching the filter — a SIGNAL_FAIL of e.g. 0 mm
+                // would otherwise drag the EMA down hard.
+                if status != RANGE_VALID {
+                    sensor.filtered_mm = None;
+                } else {
+                    // Affine correction first, then EMA in mm-space.
+                    let corrected = raw as f32 * sensor.slope + sensor.offset_mm;
+                    let filt = match sensor.filtered_mm {
+                        Some(prev) => EMA_ALPHA * corrected + (1.0 - EMA_ALPHA) * prev,
+                        None => corrected,
+                    };
+                    sensor.filtered_mm = Some(filt);
+                    data.range_milli_meter = filt as i16;
+
+                    let wrapped_data = RangingMeasurementData(data);
+                    sensor.last_data = wrapped_data.clone();
+
+                    if sensor.device.address() == 0x32 {
+                        trace!(
+                            "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
+                            sensor.device.address(),
+                            wrapped_data.get_distance_mm(),
+                            raw,
+                            wrapped_data.get_sigma_mm(),
+                            wrapped_data.get_status(),
+                        );
+                    }
+
+                    watch.sender().send(DistanceSnapshot {
+                        data: wrapped_data,
+                        at: Instant::now(),
+                    });
+                }
+                if let Err(e) = clear_interrupt(&mut sensor.device, &mut sensor.i2c) {
                     warn!(
                         "Error clearing interrupt for {:#x}: {:?}",
                         sensor.device.address(),
@@ -254,7 +310,10 @@ pub async fn distance_sensor_task(
                 10.ms_timer().await;
 
                 if let Err(e2) = sensor_45d_right.recover_sensor().await {
-                    warn!("Recovery failed for {:#x}: {:?}", sensor_45d_right.address, e2);
+                    warn!(
+                        "Recovery failed for {:#x}: {:?}",
+                        sensor_45d_right.address, e2
+                    );
                     500.ms_timer().await;
                     continue;
                 }
@@ -264,7 +323,10 @@ pub async fn distance_sensor_task(
                     continue;
                 }
                 if let Err(e2) = sensor_45d_left.recover_sensor().await {
-                    warn!("Recovery failed for {:#x}: {:?}", sensor_45d_left.address, e2);
+                    warn!(
+                        "Recovery failed for {:#x}: {:?}",
+                        sensor_45d_left.address, e2
+                    );
                     500.ms_timer().await;
                     continue;
                 }
