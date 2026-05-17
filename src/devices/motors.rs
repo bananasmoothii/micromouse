@@ -1,7 +1,7 @@
 use crate::utils::DurationUtils;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::Relaxed;
-use defmt::{error, trace};
+use defmt::error;
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::gpio::{Level, Output, Pin, Speed};
 use embassy_stm32::timer::simple_pwm::SimplePwm;
@@ -60,7 +60,7 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
 
     /// duty_cycle should be [-1.0, 1.0], -1.0 being max speed backwards and 1.0 being max speed
     /// forwards. 0.0 will call [Motor::brake].
-    pub fn set_pwm(&mut self, mut duty_cycle: f32) {
+    pub fn set_pwm(&mut self, duty_cycle: f32) {
         assert!(
             -1.0 <= duty_cycle && duty_cycle <= 1.0,
             "PWM duty cycle must be between -1.0 and 1.0"

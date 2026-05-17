@@ -1,25 +1,17 @@
 use crate::devices::vl53lxx::{Config, MeasurementData};
 use crate::utils::DurationUtils;
 use defmt::{Format, debug, info, trace, warn};
-use embassy_executor::{SpawnError, Spawner};
 use embassy_futures::select::{Either3, select3};
 use embassy_stm32::gpio::Output;
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
-use embassy_stm32::pac::interrupt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
 use embassy_sync::watch::Watch;
-use embassy_time::{Duration, Instant, TimeoutError, Timer};
-use embedded_hal::i2c::I2c as _;
+use embassy_time::{Duration, Instant};
 use embedded_hal_bus::i2c::RefCellDevice;
-use futures_util::future::select_all;
-use vl53l1::RangeStatus::{RANGE_VALID, SIGNAL_FAIL};
+use vl53l1::RangeStatus::RANGE_VALID;
 use vl53l1::*;
-
-pub static VL53L1X_CHANNEL: Channel<CriticalSectionRawMutex, RangingMeasurementData, 4> =
-    Channel::new();
 
 /// Exponential moving average factor applied to the affine-corrected distance before publish:
 /// `filt = α · new + (1-α) · prev`. α=0.5 gives ~30% noise reduction and ~1-sample (~70 ms)
@@ -56,8 +48,9 @@ pub struct DistanceSnapshot {
     pub at: Instant,
 }
 
-/// `N` = max number of concurrent receivers.
-/// Currently: positioning_task, straight_line wall-follow, main maze-runner, future wall-mapper → 4.
+/// `N` = max number of concurrent receivers per watch. Today: straight_line wall-follow on all
+/// three watches; main maze-runner also reads MIDDLE; future wall-mapper / fusion lateral
+/// correction will add more. 4 leaves headroom without spending much RAM.
 type DistWatch = Watch<CriticalSectionRawMutex, DistanceSnapshot, 4>;
 
 /// Sensor looking 45° to the left (mounted on the right side of the robot, crossed).
@@ -70,9 +63,9 @@ pub static VL53L1X_45D_RIGHT_WATCH: DistWatch = Watch::new();
 impl VL53L1XSensor {
     pub(crate) async fn init_new(
         mut config: Config,
-        mut i2c: I,
+        i2c: I,
         address: u8,
-    ) -> Result<Self, Error<i2c::Error>> {
+    ) -> Result<Self, Error<E>> {
         info!(
             "Initializing VL53L1X distance sensor at address 0x{:02x}",
             address
@@ -103,7 +96,7 @@ impl VL53L1XSensor {
     }
 
     /// Attempt to recover from a sensor error by stopping and restarting measurements
-    async fn recover_sensor(&mut self) -> Result<(), Error<i2c::Error>> {
+    async fn recover_sensor(&mut self) -> Result<(), Error<E>> {
         warn!("Hardware recovery for VL53L1X {:#x}", self.address);
 
         // XSHUT high — sensor boots at default address 0x29
@@ -146,7 +139,7 @@ impl VL53L1XSensor {
         pac::I2C1.cr1().modify(|w| w.set_pe(true));
     }
 
-    fn reinit_no_xshut(&mut self, new_device: bool) -> Result<(), Error<i2c::Error>> {
+    fn reinit_no_xshut(&mut self, new_device: bool) -> Result<(), Error<E>> {
         if new_device {
             self.device = Device::default(); // resets address to 0x29
         }

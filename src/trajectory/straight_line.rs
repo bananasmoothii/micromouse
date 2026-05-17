@@ -11,7 +11,7 @@ use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
 use crate::trajectory::{
     FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode,
 };
-use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils, MathUtils};
+use crate::utils::{CellMutexUtils, DurationUtils, MathUtils};
 use alloc::boxed::Box;
 use alloc::format;
 use core::f32::consts::PI;

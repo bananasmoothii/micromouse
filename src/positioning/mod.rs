@@ -3,18 +3,14 @@ pub mod mpu;
 pub mod odometry;
 pub mod types;
 
-use alloc::format;
 use core::cell::Cell;
 use crate::devices::mpu9250::Mpu9250Sensor;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use crate::flash_log;
 use crate::positioning::types::PositionState;
 use crate::utils::{CellMutexUtils, DurationUtils};
 use defmt::{debug, error};
 use crate::positioning::odometry::get_odom_delta;
-use core::convert::TryFrom;
-use core::sync::atomic::Ordering::Relaxed;
 use crate::trajectory::{get_current_fusion_mode};
 
 /// `v_forward` is the EMA-smoothed tick-count velocity: ticks accumulated over the 20 ms fusion
@@ -66,10 +62,6 @@ pub async fn positioning_task(mpu: &'static mut Mpu9250Sensor) {
             }
         };
 
-
-        let gyro_d_deg = mpu_result.d_theta.to_degrees();
-        let odom_d_deg = odom_delta.d_theta.to_degrees();
-        let mag_deg = mpu_result.relative_mag.to_degrees();
         let mode = get_current_fusion_mode();
         let state = fusion_proc.update(odom_delta, mpu_result, mode);
         CURRENT_POS.set(state);

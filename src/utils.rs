@@ -1,9 +1,8 @@
 use core::cell::Cell;
 use embassy_stm32::time::Hertz;
 use embassy_sync::blocking_mutex::Mutex;
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex};
+use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_time::{Duration, Timer};
-use crate::positioning::types::PositionState;
 
 pub trait DurationUtils {
     fn us(self) -> Duration;

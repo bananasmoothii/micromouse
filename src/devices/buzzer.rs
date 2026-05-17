@@ -1,6 +1,5 @@
 use cortex_m::prelude::_embedded_hal_Pwm;
-use defmt::info;
-use embassy_stm32::peripherals::{TIM1, TIM2};
+use embassy_stm32::peripherals::TIM1;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::simple_pwm::SimplePwm;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;

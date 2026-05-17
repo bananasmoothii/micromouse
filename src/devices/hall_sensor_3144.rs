@@ -1,7 +1,6 @@
 use crate::devices::motors::{LEFT_FORWARD, RIGHT_FORWARD};
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use Ordering::Relaxed;
-use defmt::println;
 use embassy_stm32::peripherals;
 use embassy_stm32::{pac, Peri};
 use embassy_stm32::pac::interrupt;

@@ -1,7 +1,6 @@
 use crate::devices::vl53lxx::vl53l1x::{VL53L1XSensor, distance_sensor_task};
 use crate::{Irqs, devices};
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::panic;
 use defmt::{error, info};
@@ -11,8 +10,7 @@ use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Output, Speed};
 use embassy_stm32::i2c::{Config, I2c};
 use embassy_stm32::peripherals::{DMA1_CH0, DMA1_CH6, I2C1, PB8, PB9};
-use embassy_stm32::time::Hertz;
-use embassy_time::{Duration, Timer};
+use embassy_time::Duration;
 use embedded_hal_bus::i2c::RefCellDevice;
 use crate::utils::{DurationUtils, HertzUtils};
 

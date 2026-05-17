@@ -7,8 +7,7 @@ use embassy_executor::Spawner;
 use embassy_stm32::adc::{Adc, SampleTime};
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::peripherals::{ADC1, PC0, PC1, PC4};
-use embassy_stm32::{Peri, peripherals};
-use micromath::F32Ext;
+use embassy_stm32::Peri;
 
 /// Current battery voltage in millivolts, updated by battery_monitoring_task.
 pub static BATTERY_VOLTAGE_MV: AtomicU32 = AtomicU32::new(0);

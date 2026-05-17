@@ -15,13 +15,12 @@ pub mod utils;
 use crate::devices::battery::start_battery_monitoring;
 use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, buzzer_task};
 use crate::devices::hall_sensor_3144;
-use crate::devices::motors::{MIN_USABLE_SPEED, Motor, WheelSide};
+use crate::devices::motors::{Motor, WheelSide};
 use crate::devices::mpu9250::Mpu9250Sensor;
-use crate::positioning::{CURRENT_POS, positioning_task};
+use crate::positioning::positioning_task;
 use crate::trajectory::TrajectorySegment;
-use crate::trajectory::in_place_turn::InPlaceTurn;
 use crate::trajectory::straight_line::StraightLine;
-use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils};
+use crate::utils::{DurationUtils, HertzUtils};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -32,7 +31,7 @@ use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::{self, ExtiInput};
 use embassy_stm32::flash::Flash;
 use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
-use embassy_stm32::peripherals::{I2C1, TIM1, TIM2, TIM3};
+use embassy_stm32::peripherals::{I2C1, TIM2, TIM3};
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel;
@@ -40,9 +39,9 @@ use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
-use embassy_time::Instant;
 use embedded_alloc::LlffHeap as Heap;
 use crate::i2c_devices::init_i2c_devices;
+use crate::trajectory::in_place_turn::InPlaceTurn;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -254,22 +253,22 @@ async fn motor_tests(
             distance: 1.0,
             out_speed: 0.0,
         }),
-        // Box::new(InPlaceTurn::from_degrees(-90.0)),
-        // Box::new(StraightLine {
-        //     distance: 1.0,
-        //     out_speed: 0.0,
-        // }),
-        // Box::new(InPlaceTurn::from_degrees(-90.0)),
-        // Box::new(StraightLine {
-        //     distance: 1.0,
-        //     out_speed: 0.0,
-        // }),
-        // Box::new(InPlaceTurn::from_degrees(-90.0)),
-        // Box::new(StraightLine {
-        //     distance: 1.0,
-        //     out_speed: 0.0,
-        // }),
-        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        Box::new(StraightLine {
+            distance: 1.0,
+            out_speed: 0.0,
+        }),
+        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        Box::new(StraightLine {
+            distance: 1.0,
+            out_speed: 0.0,
+        }),
+        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        Box::new(StraightLine {
+            distance: 1.0,
+            out_speed: 0.0,
+        }),
+        Box::new(InPlaceTurn::from_degrees(-90.0)),
     ];
     for segment in &segments {
         segment.execute(&mut motor_left, &mut motor_right).await;

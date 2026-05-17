@@ -3,11 +3,10 @@ use crate::devices::motors::Motor;
 use crate::flash_log;
 use crate::positioning::CURRENT_POS;
 use crate::positioning::odometry::WHEEL_BASE;
-use crate::trajectory::{FusionMode, FUSION_MODE, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode};
+use crate::trajectory::{FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode};
 use crate::utils::{CellMutexUtils, DurationUtils};
 use alloc::format;
 use core::f32::consts::PI;
-use core::sync::atomic::Ordering::Relaxed;
 use embassy_stm32::peripherals::{TIM2, TIM3};
 
 // Position-form PI on angle error → wheel tangential speed (m/s per radian).
@@ -117,7 +116,6 @@ impl TrajectorySegment for InPlaceTurn {
 
             // Commanded angular speed: both wheels at ±turn_speed, so ω = 2v / WHEEL_BASE.
             let omega_commanded = pi_output.signum() * 2.0 * turn_speed / WHEEL_BASE;
-            let omega_error = omega_commanded - omega_current;
 
             flash_log!(
                 "InPlaceTurn: remaining {}deg, coast_est {}deg, pi_out {}, turn_speed {}, integral {}, cur_omega {}d/s, cmd_omega {}d/s",

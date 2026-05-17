@@ -2,7 +2,7 @@ use crate::utils::HertzUtils;
 use core::convert::Infallible;
 use defmt::{error, info};
 use embassy_stm32::gpio::Output;
-use embassy_stm32::mode::{Async, Blocking};
+use embassy_stm32::mode::Async;
 use embassy_stm32::spi;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::spi::mode::Master;
