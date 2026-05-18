@@ -21,7 +21,7 @@ use embassy_time::Instant;
 
 /// Master switch.  When `false`: `flash_log!` is a no-op (no RTT print, no RAM buffer write),
 /// and `startup_dump`/`flush` return immediately without touching flash.
-pub const ENABLED: bool = false;
+pub const ENABLED: bool = true;
 
 const SECTOR_OFFSET: u32 = 0x0006_0000; // sector 7 start, relative to flash base
 const SECTOR_SIZE: u32 = 128 * 1024;

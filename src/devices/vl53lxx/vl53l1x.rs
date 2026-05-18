@@ -10,7 +10,10 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant};
 use embedded_hal_bus::i2c::RefCellDevice;
-use vl53l1::RangeStatus::RANGE_VALID;
+use vl53l1::RangeStatus::{
+    HARDWARE_FAIL, NONE, OUTOFBOUNDS_FAIL, PROCESSING_FAIL, RANGE_INVALID, SIGNAL_FAIL,
+    SYNCRONISATION_INT, XTALK_SIGNAL_FAIL,
+};
 use vl53l1::*;
 
 /// Exponential moving average factor applied to the affine-corrected distance before publish:
@@ -44,7 +47,11 @@ type E = i2c::Error;
 /// stale once their `at` timestamp is more than a few sensor periods old (~200 ms).
 #[derive(Clone)]
 pub struct DistanceSnapshot {
+    /// Distance after per-sensor affine correction and EMA filtering.
     pub data: RangingMeasurementData,
+    /// Raw `range_milli_meter` straight out of the sensor for this sample — no correction,
+    /// no filter. Kept for debugging / log inspection.
+    pub raw_mm: i16,
     pub at: Instant,
 }
 
@@ -243,9 +250,23 @@ pub async fn distance_sensor_task(
                 let raw = data.range_milli_meter;
                 let status = data.range_status;
 
-                // Drop invalid readings before touching the filter — a SIGNAL_FAIL of e.g. 0 mm
-                // would otherwise drag the EMA down hard.
-                if status != RANGE_VALID {
+                // Reject only statuses where `range_milli_meter` is meaningless. Everything else
+                // (RANGE_VALID, RANGE_VALID_MIN_RANGE_CLIPPED, RANGE_VALID_NO_WRAP_CHECK_FAIL,
+                // WRAP_TARGET_FAIL, SIGMA_FAIL, RANGE_VALID_MERGED_PULSE, MIN_RANGE_FAIL,
+                // TARGET_PRESENT_LACK_OF_SIGNAL) carries a usable distance — particularly the
+                // WRAP_TARGET_FAIL case which fires on rapidly-changing range.
+                let untrustable = matches!(
+                    status,
+                    SIGNAL_FAIL
+                        | HARDWARE_FAIL
+                        | OUTOFBOUNDS_FAIL
+                        | PROCESSING_FAIL
+                        | XTALK_SIGNAL_FAIL
+                        | SYNCRONISATION_INT
+                        | RANGE_INVALID
+                        | NONE
+                );
+                if untrustable {
                     sensor.filtered_mm = None;
                 } else {
                     // Affine correction first, then EMA in mm-space.
@@ -260,7 +281,7 @@ pub async fn distance_sensor_task(
                     let wrapped_data = RangingMeasurementData(data);
                     sensor.last_data = wrapped_data.clone();
 
-                    if sensor.device.address() == 0x32 {
+                    if sensor.device.address() == 0x31 {
                         trace!(
                             "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
                             sensor.device.address(),
@@ -273,6 +294,7 @@ pub async fn distance_sensor_task(
 
                     watch.sender().send(DistanceSnapshot {
                         data: wrapped_data,
+                        raw_mm: raw,
                         at: Instant::now(),
                     });
                 }

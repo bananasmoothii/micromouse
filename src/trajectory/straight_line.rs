@@ -1,9 +1,8 @@
+use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask};
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
 use crate::devices::motors::{MIN_USABLE_SPEED, Motor};
 use crate::devices::vl53lxx::MeasurementData;
-use crate::devices::vl53lxx::vl53l1x::{
-    VL53L1X_45D_LEFT_WATCH, VL53L1X_45D_RIGHT_WATCH, VL53L1X_MIDDLE_WATCH,
-};
+use crate::devices::vl53lxx::vl53l1x::{DistanceSnapshot, VL53L1X_45D_LEFT_WATCH, VL53L1X_45D_RIGHT_WATCH, VL53L1X_MIDDLE_WATCH};
 use embassy_time::{Duration, Instant};
 use crate::flash_log;
 use crate::positioning::CURRENT_POS;
@@ -11,7 +10,7 @@ use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
 use crate::trajectory::{
     FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode,
 };
-use crate::utils::{CellMutexUtils, DurationUtils, MathUtils};
+use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils, MathUtils};
 use alloc::boxed::Box;
 use alloc::format;
 use core::f32::consts::PI;
@@ -84,6 +83,21 @@ const FRONT_WALL_VETO_M: f32 = FRONT_CLEARANCE_CENTERED + 0.06; // ≈ 0.085 m
 const KP_WALL_STEER: f32 = 1.0;
 const WALL_STALE: Duration = Duration::from_millis(200);
 
+/// `DistanceToFrontWall` stop hysteresis. With α=0.5 EMA in `vl53l1x.rs` and observed σ≈2 mm,
+/// 3 mm ≈ 1.5σ — tight enough to land accurately, loose enough that single-sample noise
+/// won't trip stop while the wall is still farther.
+const WALL_STOP_TOLERANCE: f32 = 0.003;
+/// Forward-prediction window added to the stop check, so we stop *before* the robot's
+/// momentum + sensor lag carry it past `target`. Covers ~1 EMA sample (70 ms) + motor stop
+/// latency (~50 ms). At cruise this fires absurdly early — but cruise speed never gets close
+/// to the wall thanks to time-ramp decel; by stop time `v_forward` is low and the lookahead
+/// is small in absolute distance.
+const STOP_LOOKAHEAD_S: f32 = 0.15;
+/// Safety bound for `DistanceToFrontWall`: if we've driven this far AND haven't yet captured
+/// a wall reading at all, give up, beep, and exit. Once we have a baseline, dead-reckoning
+/// handles the rest — driving past 2 m to chase a far wall is allowed.
+const SAFETY_MAX_DISTANCE: f32 = 2.0;
+
 /// Minimum commanded speed during deceleration — lower than MIN_USABLE_SPEED so friction dominates.
 /// Requires the MIN_USABLE_PWM snap in motors.rs to be removed.
 const DECEL_MIN_SPEED: f32 = MIN_USABLE_SPEED / 2.0;
@@ -100,12 +114,17 @@ const BRAKE_DISTANCE: f32 = 0.00;
 
 static HEADING_INTEGRAL: AtomicU32 = AtomicU32::new(0f32.to_bits());
 
+pub enum StraightLineGoal {
+    Distance(f32),
+    DistanceToFrontWall(f32),
+}
+
 /// Accelerates to max speed (if possible), maintains it, then decelerates.
 /// Acceleration is done purely through PI control, deceleration is commanded gradually (still
 /// through PI control to satisfy DECELERATION_SPEED.
 /// Implementation is distance-based, not time-based
 pub struct StraightLine {
-    pub distance: f32,
+    pub goal: StraightLineGoal,
     pub out_speed: f32,
 }
 
@@ -130,25 +149,51 @@ impl TrajectorySegment for StraightLine {
         let initial_theta = start_pos.theta;
         let left_ticks_start = LEFT_TICKS_CUMULATIVE.load(Relaxed);
         let right_ticks_start = RIGHT_TICKS_CUMULATIVE.load(Relaxed);
-        let target_ticks = (self.distance / DISTANCE_PER_TICK).round() as i32;
 
-        // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
-        let decel_distance_full_speed =
-            (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * DECELERATION);
-        let (max_reachable_speed, decel_distance) = if decel_distance_full_speed <= self.distance {
-            (MAX_SPEED_M_S, decel_distance_full_speed)
-        } else {
-            // v_max² = 2aΔx + v_final²    (with Δx = self.distance)
-            (
-                (2.0 * DECELERATION * self.distance + self.out_speed.square()).sqrt(),
-                self.distance,
-            )
+        // For `Distance(d)` we plan the kinematic profile up front. For `DistanceToFrontWall`
+        // there's no planned total — accel uncapped, decel computed live from middle-ToF.
+        let planned_total: Option<f32> = match self.goal {
+            StraightLineGoal::Distance(d) => Some(d),
+            StraightLineGoal::DistanceToFrontWall(_) => None,
         };
-        let decel_start_distance = self.distance - decel_distance;
+        let target_ticks: i32 = planned_total
+            .map(|d| (d / DISTANCE_PER_TICK).round() as i32)
+            .unwrap_or(i32::MAX);
+        // Kinematic plan: only valid when `planned_total` is Some; values for `None` are
+        // placeholders never read on the wall-mode path.
+        let (max_reachable_speed, decel_distance, decel_start_distance) = match planned_total {
+            Some(d) => {
+                // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
+                let decel_distance_full_speed =
+                    (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * DECELERATION);
+                let (mrs, dd) = if decel_distance_full_speed <= d {
+                    (MAX_SPEED_M_S, decel_distance_full_speed)
+                } else {
+                    // v_max² = 2aΔx + v_final²    (with Δx = d)
+                    ((2.0 * DECELERATION * d + self.out_speed.square()).sqrt(), d)
+                };
+                (mrs, dd, d - dd)
+            }
+            None => (MAX_SPEED_M_S, 0.0, f32::INFINITY),
+        };
 
         let mut speed_integral = 0.0f32;
         let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
         let mut in_decel = false;
+        // Dead-reckoning baseline for `DistanceToFrontWall`: `(last_fresh_m, distance_at_then)`.
+        // The middle ToF can blink out for many ticks at long range with the tight ROI; we use
+        // odometry between fresh snapshots so a transient sensor outage doesn't blind decel.
+        let mut wall_baseline: Option<(f32, f32)> = None;
+        // Snapped decel state for `DistanceToFrontWall`: `(entry_instant, entry_speed,
+        // ramp_duration_s)`. Ramp is **time-based** rather than distance-based: if the wheels
+        // stall (e.g. one of them collided with the wall and is jammed), odometry freezes but
+        // time keeps flowing — target_speed keeps dropping → PI commands zero → motors brake
+        // instead of pushing into the wall.
+        let mut wall_decel: Option<(Instant, f32, f32)> = None;
+        // Peak forward velocity observed this run. Used for the wall-mode decel trigger and
+        // entry speed because `current_pos.v_forward` lags reality during fast acceleration —
+        // commanded speed can saturate while the EKF estimate is still climbing.
+        let mut max_v_seen: f32 = 0.0;
 
         let mut left_rcv = VL53L1X_45D_LEFT_WATCH
             .receiver()
@@ -162,6 +207,7 @@ impl TrajectorySegment for StraightLine {
 
         loop {
             let current_pos = CURRENT_POS.get();
+            max_v_seen = max_v_seen.max(current_pos.v_forward);
             let left_ticks = LEFT_TICKS_CUMULATIVE.load(Relaxed) - left_ticks_start;
             let right_ticks = RIGHT_TICKS_CUMULATIVE.load(Relaxed) - right_ticks_start;
             // Tick-based distance: more accurate than EKF position for stop condition
@@ -184,7 +230,7 @@ impl TrajectorySegment for StraightLine {
 
             // Fetch latest diagonal/middle snapshots and filter by freshness.
             let now = Instant::now();
-            let fresh = |snap: &crate::devices::vl53lxx::vl53l1x::DistanceSnapshot| {
+            let fresh = |snap: &DistanceSnapshot| {
                 now.checked_duration_since(snap.at)
                     .map(|d| d < WALL_STALE)
                     .unwrap_or(false)
@@ -193,14 +239,18 @@ impl TrajectorySegment for StraightLine {
             let right_snap = right_rcv.try_get().filter(fresh);
             let middle_snap = middle_rcv.try_get().filter(fresh);
 
-            // Convert raw mm readings (i16) to meters at the boundary; treat ≤0 as "no return".
-            let to_m = |s: &crate::devices::vl53lxx::vl53l1x::DistanceSnapshot| {
+            // Convert filtered mm readings (i16) to meters at the boundary; treat ≤0 as "no return".
+            let to_m = |s: &DistanceSnapshot| {
                 let mm = s.data.get_distance_mm();
                 if mm > 0 { Some(mm as f32 / 1000.0) } else { None }
             };
             let left_m = left_snap.as_ref().and_then(to_m);
             let right_m = right_snap.as_ref().and_then(to_m);
             let middle_m = middle_snap.as_ref().and_then(to_m);
+            // Pre-correction raw readings, for diagnostics only. -1 sentinel = no fresh snapshot.
+            let left_raw = left_snap.as_ref().map(|s| s.raw_mm as i32).unwrap_or(-1);
+            let middle_raw = middle_snap.as_ref().map(|s| s.raw_mm as i32).unwrap_or(-1);
+            let right_raw = right_snap.as_ref().map(|s| s.raw_mm as i32).unwrap_or(-1);
 
             // Veto diagonals when the middle sensor sees a close front wall: the diagonals
             // are almost certainly hitting that same front wall, not the side wall we want.
@@ -226,9 +276,109 @@ impl TrajectorySegment for StraightLine {
 
             let steering = (steer_p + steer_i + wall_steer).clamp(-MAX_STEERING, MAX_STEERING);
 
-            if avg_ticks >= target_ticks {
+            // Acceleration ramp: ramps from MIN_USABLE_SPEED up to max_reachable_speed using
+            // kinematics. Same formula for both modes; the cap differs (wall mode = MAX_SPEED).
+            let accel_target = (MIN_USABLE_SPEED.square() + 2.0 * ACCELERATION * distance)
+                .sqrt()
+                .min(max_reachable_speed);
+
+            // Mode-specific decel and termination flags.
+            //   - `Distance`: distance-based linear ramp, terminate on tick target.
+            //   - `DistanceToFrontWall`: live kinematic decel from middle-ToF reading,
+            //     terminate when wall is within tolerance OR safety bound is hit.
+            let (decel_target, normal_stop, safety_bail) = match self.goal {
+                StraightLineGoal::Distance(_) => {
+                    let dt = if distance >= decel_start_distance {
+                        if !in_decel {
+                            in_decel = true;
+                            speed_integral *= DECEL_I_FACTOR;
+                        }
+                        (max_reachable_speed
+                            - (distance - decel_start_distance) * max_reachable_speed
+                            / decel_distance)
+                            .max(MIN_USABLE_SPEED)
+                    } else {
+                        f32::INFINITY
+                    };
+                    (dt, avg_ticks >= target_ticks, false)
+                }
+                StraightLineGoal::DistanceToFrontWall(target) => {
+                    // Snap baseline on every fresh reading; dead-reckon between them.
+                    if let Some(m) = middle_m {
+                        wall_baseline = Some((m, distance));
+                    }
+                    let estimated_m = wall_baseline.map(|(m, d_at)| m - (distance - d_at));
+
+                    // Velocity-proportional stop threshold compensates for EMA + sensor +
+                    // motor-stop lag. At v≈0 it reduces to `target + tolerance`.
+                    let stop_threshold = target
+                        + WALL_STOP_TOLERANCE
+                        + current_pos.v_forward.max(0.0) * STOP_LOOKAHEAD_S;
+                    let stop_now = matches!(estimated_m, Some(m) if m <= stop_threshold);
+
+                    // Trigger decel using `max_v_seen` (not `v_forward`) — covers the case where
+                    // PI commanded near-MAX_SPEED but the EKF velocity estimate lags, leaving
+                    // real momentum hidden. dd assumes we'd come from `entry_v` down to
+                    // `out_speed` at `DECELERATION` — same kinematics as `Distance` mode.
+                    if wall_decel.is_none() {
+                        if let Some(m) = estimated_m {
+                            let entry_v = max_v_seen.max(MIN_USABLE_SPEED);
+                            let dd = (entry_v * entry_v - self.out_speed.square())
+                                / (2.0 * DECELERATION);
+                            if (m - target) <= dd {
+                                // Ramp duration = time to slow `entry_v` → `out_speed` at
+                                // `DECELERATION`. Time-based so wheel stall doesn't freeze it.
+                                let ramp_dur = (entry_v - self.out_speed) / DECELERATION;
+                                wall_decel = Some((Instant::now(), entry_v, ramp_dur));
+                                in_decel = true;
+                                speed_integral *= DECEL_I_FACTOR;
+                            }
+                        }
+                    }
+
+                    // After the ramp finishes (or wall reached), terminate normally. The "ramp
+                    // done" branch is the wheel-stall safety: if odometry froze and the sensor
+                    // can't see the wall (e.g. clipped raw), we still stop after braking time.
+                    let ramp_done = matches!(
+                        wall_decel,
+                        Some((entry_t, _, ramp_dur))
+                            if entry_t.elapsed().as_micros() as f32 * 1e-6 >= ramp_dur
+                    );
+
+                    let dt = if stop_now {
+                        DECEL_MIN_SPEED
+                    } else if let Some((entry_t, entry_v, ramp_dur)) = wall_decel {
+                        let elapsed = entry_t.elapsed().as_micros() as f32 * 1e-6;
+                        let progress = (elapsed / ramp_dur).clamp(0.0, 1.0);
+                        // Linear time ramp from `entry_v` down to `out_speed`, floored.
+                        (entry_v + (self.out_speed - entry_v) * progress).max(DECEL_MIN_SPEED)
+                    } else {
+                        // Never seen the wall (or wall still far) → keep cruising.
+                        f32::INFINITY
+                    };
+                    // Only bail at the safety distance if we've never seen a wall — once a
+                    // baseline exists, trust dead-reckoning + stop_now to land us safely even
+                    // if the wall was further than 2 m.
+                    let bail = !stop_now
+                        && distance >= SAFETY_MAX_DISTANCE
+                        && wall_baseline.is_none();
+                    (dt, stop_now || ramp_done, bail)
+                }
+            };
+
+            if normal_stop || safety_bail {
+                if safety_bail {
+                    // 3× short low beep so the operator hears "I gave up looking for the wall".
+                    for _ in 0..3 {
+                        let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
+                            freq: 400.hz(),
+                            duration: 80.ms(),
+                        });
+                    }
+                }
                 flash_log!(
-                    "Distance reached: left {} ticks ({} turns), right {} ticks ({} turns), speed error: {}",
+                    "StraightLine done ({}): left {} ticks ({} turns), right {} ticks ({} turns), speed error: {}",
+                    if safety_bail { "safety bail" } else { "target reached" },
                     left_ticks,
                     left_ticks / TICKS_PER_REVOLUTION as i32,
                     right_ticks,
@@ -241,26 +391,6 @@ impl TrajectorySegment for StraightLine {
                 break;
             }
 
-            // Acceleration ramp: ramps from 0 up to max_reachable_speed using kinematics.
-            let accel_target = (MIN_USABLE_SPEED.square() + 2.0 * ACCELERATION * distance)
-                .sqrt()
-                .min(max_reachable_speed);
-
-            // Deceleration ramp: distance-based, always reaches out_speed at self.distance.
-            // Integral resets once on decel entry to clear cruise windup.
-            // Deceleration always takes precedence (min of both ramps).
-            let decel_target = if distance >= decel_start_distance {
-                if !in_decel {
-                    in_decel = true;
-                    speed_integral *= DECEL_I_FACTOR;
-                }
-                (max_reachable_speed
-                    - (distance - decel_start_distance) * max_reachable_speed / decel_distance)
-                    .max(MIN_USABLE_SPEED)
-            } else {
-                f32::INFINITY
-            };
-
             let target_speed = accel_target.min(decel_target);
 
             let speed_error = target_speed - current_pos.v_forward;
@@ -270,8 +400,11 @@ impl TrajectorySegment for StraightLine {
             let p = KP * speed_error;
             let i = KI * speed_integral;
 
-            let in_brake = self.distance - distance <= BRAKE_DISTANCE;
-            let sign = self.distance.signum();
+            // `in_brake` only kicks in for `Distance` mode when we've reached the target
+            // (BRAKE_DISTANCE = 0.0 today makes this a no-op). Wall mode terminates via
+            // `normal_stop` above and never enters this branch.
+            let in_brake = planned_total.map_or(false, |d| d - distance <= BRAKE_DISTANCE);
+            let sign = planned_total.map_or(1.0, |d| d.signum());
             let pi_out = p + i;
             let min_speed = if in_decel { DECEL_MIN_SPEED } else { MIN_USABLE_SPEED };
             let commanded_speed = if in_brake {
@@ -280,10 +413,16 @@ impl TrajectorySegment for StraightLine {
                 pi_out.clamp(sign * min_speed, sign * 1.5 * MAX_SPEED_M_S)
             };
             let active_steering = if in_brake { 0.0 } else { steering };
+            // For the log's `total` field: planned total for `Distance`, target front-wall
+            // distance for `DistanceToFrontWall` (so plot_straight_line.py keeps parsing).
+            let log_total = match self.goal {
+                StraightLineGoal::Distance(d) => d,
+                StraightLineGoal::DistanceToFrontWall(t) => t,
+            };
             flash_log!(
-                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, wall_steer: {}, L: {} M: {} R: {} (drift_mm: {}), hdg: {}deg",
+                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, wall_steer: {}, L: {} (raw {}) M: {} (raw {}) R: {} (raw {}) (drift_mm: {}), hdg: {}deg",
                 format!("{:.2}", distance).as_str(),
-                format!("{:.2}", self.distance).as_str(),
+                format!("{:.2}", log_total).as_str(),
                 format!("{:.2}", target_speed).as_str(),
                 if in_decel { " (decel)" } else { "" },
                 format!("{:.2}", current_pos.v_forward).as_str(),
@@ -296,8 +435,11 @@ impl TrajectorySegment for StraightLine {
                 format!("{:.4}", steer_i).as_str(),
                 format!("{:.4}", wall_steer).as_str(),
                 left_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
+                left_raw,
                 middle_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
+                middle_raw,
                 right_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
+                right_raw,
                 format!("{:.1}", drift_m * 1000.0).as_str(),
                 format!("{:.1}", heading_error.to_degrees()).as_str(),
             );

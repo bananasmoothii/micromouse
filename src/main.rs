@@ -40,8 +40,10 @@ use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi};
 use embedded_alloc::LlffHeap as Heap;
+use crate::dimensions::FRONT_CLEARANCE_CENTERED;
 use crate::i2c_devices::init_i2c_devices;
 use crate::trajectory::in_place_turn::InPlaceTurn;
+use crate::trajectory::straight_line::StraightLineGoal::{Distance, DistanceToFrontWall};
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -250,25 +252,29 @@ async fn motor_tests(
 
     let segments: Vec<Box<dyn TrajectorySegment>> = vec![
         Box::new(StraightLine {
-            distance: 1.0,
+            goal: DistanceToFrontWall(FRONT_CLEARANCE_CENTERED),
             out_speed: 0.0,
         }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     goal: Distance(1.0),
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     goal: Distance(1.0),
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     goal: Distance(1.0),
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     goal: Distance(1.0),
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
     ];
     for segment in &segments {
         segment.execute(&mut motor_left, &mut motor_right).await;
