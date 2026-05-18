@@ -163,11 +163,11 @@ impl VL53L1XSensor {
         set_user_roi(
             &mut self.device,
             UserRoi {
-                // 6x6 centered region
-                top_left_x: 5,
-                bot_right_y: 5,
-                bot_right_x: 10,
-                top_left_y: 10,
+                // 8x8 centered region
+                top_left_x: 4,
+                bot_right_y: 4,
+                bot_right_x: 11,
+                top_left_y: 11,
             },
         )?;
 
@@ -260,16 +260,16 @@ pub async fn distance_sensor_task(
                     let wrapped_data = RangingMeasurementData(data);
                     sensor.last_data = wrapped_data.clone();
 
-                    // if sensor.device.address() == 0x31 {
-                    //     trace!(
-                    //         "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
-                    //         sensor.device.address(),
-                    //         wrapped_data.get_distance_mm(),
-                    //         raw,
-                    //         wrapped_data.get_sigma_mm(),
-                    //         wrapped_data.get_status(),
-                    //     );
-                    // }
+                    if sensor.device.address() == 0x32 {
+                        // trace!(
+                        //     "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
+                        //     sensor.device.address(),
+                        //     wrapped_data.get_distance_mm(),
+                        //     raw,
+                        //     wrapped_data.get_sigma_mm(),
+                        //     wrapped_data.get_status(),
+                        // );
+                    }
 
                     watch.sender().send(DistanceSnapshot {
                         data: wrapped_data,

@@ -28,7 +28,7 @@ pub async fn init_i2c_devices(
 ) {
     let mut i2c_config = Config::default();
     // Use 100kHz for more reliable communication when we don't have pull-up resistors
-    i2c_config.frequency = 100.khz();
+    i2c_config.frequency = 200.khz();
     i2c_config.gpio_speed = Speed::High;
     i2c_config.timeout = Duration::from_millis(50);
 
@@ -81,11 +81,11 @@ pub async fn init_i2c_devices(
                 //                                          → publishes to VL53L1X_45D_LEFT_WATCH
                 match i {
                     // 0x30 — mounted left, looks 45° right (the "looking-right" diagonal).
-                    // raw ≈94 mm at 80 mm true, raw ≈320 mm at 300 mm true.
-                    //   slope  = 220/226 ≈ 0.9735;  offset = 80 - 0.9735·94 ≈ -11.51
+                    // raw ≈94 mm at 80 mm true, raw ≈412 mm at 400 mm true.
+                    //   slope  = 320/318 ≈ 1.0063;  offset = 80 - 1.0063·94 ≈ -14.59
                     0 => {
-                        s.slope = 0.9735;
-                        s.offset_mm = -11.51;
+                        s.slope = 1.0063;
+                        s.offset_mm = -14.59;
                         sensor1 = Some(s);
                     }
                     // 0x31 — front middle, looks forward.
@@ -93,15 +93,15 @@ pub async fn init_i2c_devices(
                     //   slope  = 350/355 ≈ 0.9859;  offset = 50 - 0.9859·41 ≈ +9.58
                     1 => {
                         s.slope = 0.9859;
-                        s.offset_mm = 9.58;
+                        s.offset_mm = 6.5;
                         sensor2 = Some(s);
                     }
                     // 0x32 — mounted right, looks 45° left (the "looking-left" diagonal).
-                    // raw ≈93 mm at 80 mm true, raw ≈404 mm at 400 mm true.
-                    //   slope  = 320/311 ≈ 1.0289;  offset = 80 - 1.0289·93 ≈ -15.69
+                    // raw ≈36 mm at 50 mm true, raw ≈391 mm at 400 mm true.
+                    //   slope  = 350/355 ≈ 0.9859;  offset = 50 - 0.9859·36 ≈ +14.51
                     2 => {
-                        s.slope = 1.0289;
-                        s.offset_mm = -15.69;
+                        s.slope = 0.9859;
+                        s.offset_mm = 14.51;
                         sensor3 = Some(s)
                     }
                     _ => panic!("Too many sensors")

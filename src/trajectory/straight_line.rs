@@ -1,8 +1,12 @@
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
 use crate::devices::motors::{MIN_USABLE_SPEED, Motor};
+use crate::devices::vl53lxx::vl53l1x::{
+    DistanceSnapshot, VL53L1X_45D_LEFT_WATCH, VL53L1X_45D_RIGHT_WATCH, VL53L1X_MIDDLE_WATCH,
+};
 use crate::flash_log;
 use crate::positioning::CURRENT_POS;
 use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
+use crate::positioning::types::PositionState;
 use crate::trajectory::{
     FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode,
 };
@@ -13,6 +17,8 @@ use core::f32::consts::PI;
 use core::sync::atomic::AtomicU32;
 use core::sync::atomic::Ordering::Relaxed;
 use embassy_stm32::peripherals::{TIM2, TIM3};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::watch::Receiver;
 use micromath::F32Ext;
 
 const MAX_SPEED_M_S: f32 = 1.0;
@@ -103,6 +109,16 @@ impl TrajectorySegment for StraightLine {
         };
         let decel_start_distance = self.distance - decel_distance;
 
+        let mut left_rcv = VL53L1X_45D_LEFT_WATCH
+            .receiver()
+            .expect("ToF Watch receivers exhausted (N=4)");
+        let mut right_rcv = VL53L1X_45D_RIGHT_WATCH
+            .receiver()
+            .expect("ToF Watch receivers exhausted (N=4)");
+        let mut middle_rcv = VL53L1X_MIDDLE_WATCH
+            .receiver()
+            .expect("ToF Watch receivers exhausted (N=4)");
+
         let mut speed_integral = 0.0f32;
         let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
         let mut in_decel = false;
@@ -114,9 +130,16 @@ impl TrajectorySegment for StraightLine {
             // Tick-based distance: more accurate than EKF position for stop condition
             let avg_ticks = (left_ticks + right_ticks) / 2;
             let distance = avg_ticks as f32 * DISTANCE_PER_TICK;
+
             // Heading error: how much the robot has rotated from its initial direction.
             // Normalized to ±π so wrap-around near ±180° doesn't produce spurious corrections.
-            let mut heading_error = current_pos.theta - initial_theta;
+            let mut heading_error = Self::get_heading_error(
+                initial_theta,
+                &mut left_rcv,
+                &mut right_rcv,
+                &mut middle_rcv,
+                current_pos,
+            );
             if heading_error > PI {
                 heading_error -= 2.0 * PI;
             }
@@ -177,40 +200,56 @@ impl TrajectorySegment for StraightLine {
             let in_brake = self.distance - distance <= BRAKE_DISTANCE;
             let sign = self.distance.signum();
             let pi_out = p + i;
-            let min_speed = if in_decel { DECEL_MIN_SPEED } else { MIN_USABLE_SPEED };
+            let min_speed = if in_decel {
+                DECEL_MIN_SPEED
+            } else {
+                MIN_USABLE_SPEED
+            };
             let commanded_speed = if in_brake {
                 0.0
             } else {
                 pi_out.clamp(sign * min_speed, sign * 1.5 * MAX_SPEED_M_S)
             };
             let active_steering = if in_brake { 0.0 } else { steering };
-            flash_log!(
-                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, wall_steer: {}, L: {} M: {} R: {} (drift_mm: {}), hdg: {}deg",
-                format!("{:.2}", distance).as_str(),
-                format!("{:.2}", self.distance).as_str(),
-                format!("{:.2}", target_speed).as_str(),
-                if in_decel { " (decel)" } else { "" },
-                format!("{:.2}", current_pos.v_forward).as_str(),
-                format!("{:.2}", speed_error).as_str(),
-                format!("{:.2}", commanded_speed).as_str(),
-                format!("{:.4}", p).as_str(),
-                format!("{:.4}", i).as_str(),
-                format!("{:.4}", active_steering).as_str(),
-                format!("{:.4}", steer_p).as_str(),
-                format!("{:.4}", steer_i).as_str(),
-                format!("{:.4}", wall_steer).as_str(),
-                left_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
-                middle_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
-                right_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
-                format!("{:.1}", drift_m * 1000.0).as_str(),
-                format!("{:.1}", heading_error.to_degrees()).as_str(),
-            );
+            // flash_log!(
+            //     "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, wall_steer: {}, L: {} M: {} R: {} (drift_mm: {}), hdg: {}deg",
+            //     format!("{:.2}", distance).as_str(),
+            //     format!("{:.2}", self.distance).as_str(),
+            //     format!("{:.2}", target_speed).as_str(),
+            //     if in_decel { " (decel)" } else { "" },
+            //     format!("{:.2}", current_pos.v_forward).as_str(),
+            //     format!("{:.2}", speed_error).as_str(),
+            //     format!("{:.2}", commanded_speed).as_str(),
+            //     format!("{:.4}", p).as_str(),
+            //     format!("{:.4}", i).as_str(),
+            //     format!("{:.4}", active_steering).as_str(),
+            //     format!("{:.4}", steer_p).as_str(),
+            //     format!("{:.4}", steer_i).as_str(),
+            //     format!("{:.4}", wall_steer).as_str(),
+            //     left_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
+            //     middle_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
+            //     right_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
+            //     format!("{:.1}", drift_m * 1000.0).as_str(),
+            //     format!("{:.1}", heading_error.to_degrees()).as_str(),
+            // );
 
             motors.set_speed_steered(commanded_speed, active_steering);
 
             UPDATE_INTERVAL_MS.ms_timer().await;
         }
         HEADING_INTEGRAL.store(heading_integral.to_bits(), Relaxed);
+    }
+}
+
+impl StraightLine {
+    fn get_heading_error(
+        initial_theta: f32,
+        left_rcv: &mut Receiver<CriticalSectionRawMutex, DistanceSnapshot, 4>,
+        right_rcv: &mut Receiver<CriticalSectionRawMutex, DistanceSnapshot, 4>,
+        middle_rcv: &mut Receiver<CriticalSectionRawMutex, DistanceSnapshot, 4>,
+        current_pos: PositionState,
+    ) -> f32 {
+        current_pos.theta - initial_theta
     }
 }
 

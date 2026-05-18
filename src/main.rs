@@ -213,9 +213,9 @@ async fn main(mut spawner: Spawner) {
         ))
         .unwrap();
 
-    spawner
-        .spawn(motor_tests(motor_left, motor_right, flash))
-        .unwrap();
+    // spawner
+    //     .spawn(motor_tests(motor_left, motor_right, flash))
+    //     .unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
