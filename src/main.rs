@@ -24,18 +24,6 @@ use panic_probe as _;
 static HEAP: Heap = Heap::empty();
 const HEAP_SIZE: usize = 10000;
 
-bind_interrupts!(
-    struct Irqs {
-        EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
-        EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
-        EXTI4 => exti::InterruptHandler<interrupt::typelevel::EXTI4>;
-        EXTI9_5 => exti::InterruptHandler<interrupt::typelevel::EXTI9_5>;
-        EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
-        I2C1_EV => i2c::EventInterruptHandler<I2C1>;
-        I2C1_ER => i2c::ErrorInterruptHandler<I2C1>;
-    }
-);
-
 #[embassy_executor::main]
 async fn main(mut spawner: Spawner) {
     println!("Allocating heap, size: {} bytes", HEAP_SIZE);
@@ -69,7 +57,7 @@ async fn main(mut spawner: Spawner) {
     );
 
     info!("Setting up chip select (CS)...");
-    let mut chip_select = Output::new(p.PC12, Level::High, Speed::High);
+    let mut chip_select = Output::new(p.PC12, Level::High, Speed::Low);
     // let interrupt = ExtiInput::new(p.PA2, p.EXTI2, Pull::None, Irqs);
 
     // MPU9250 requires CS to be high during power-on to enable SPI mode
