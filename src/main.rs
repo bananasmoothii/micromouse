@@ -149,7 +149,7 @@ async fn main(mut spawner: Spawner) {
     );
 
     info!("Setting up chip select (CS)...");
-    let mut chip_select = Output::new(p.PC12, Level::High, Speed::High);
+    let mut chip_select = Output::new(p.PC12, Level::High, Speed::Low);
     // let interrupt = ExtiInput::new(p.PA2, p.EXTI2, Pull::None, Irqs);
 
     // MPU9250 requires CS to be high during power-on to enable SPI mode
@@ -253,22 +253,22 @@ async fn motor_tests(
             distance: 1.0,
             out_speed: 0.0,
         }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
-        Box::new(StraightLine {
-            distance: 1.0,
-            out_speed: 0.0,
-        }),
-        Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     distance: 1.0,
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     distance: 1.0,
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+        // Box::new(StraightLine {
+        //     distance: 1.0,
+        //     out_speed: 0.0,
+        // }),
+        // Box::new(InPlaceTurn::from_degrees(-90.0)),
     ];
     for segment in &segments {
         segment.execute(&mut motor_left, &mut motor_right).await;

@@ -260,16 +260,16 @@ pub async fn distance_sensor_task(
                     let wrapped_data = RangingMeasurementData(data);
                     sensor.last_data = wrapped_data.clone();
 
-                    if sensor.device.address() == 0x32 {
-                        trace!(
-                            "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
-                            sensor.device.address(),
-                            wrapped_data.get_distance_mm(),
-                            raw,
-                            wrapped_data.get_sigma_mm(),
-                            wrapped_data.get_status(),
-                        );
-                    }
+                    // if sensor.device.address() == 0x31 {
+                    //     trace!(
+                    //         "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
+                    //         sensor.device.address(),
+                    //         wrapped_data.get_distance_mm(),
+                    //         raw,
+                    //         wrapped_data.get_sigma_mm(),
+                    //         wrapped_data.get_status(),
+                    //     );
+                    // }
 
                     watch.sender().send(DistanceSnapshot {
                         data: wrapped_data,
