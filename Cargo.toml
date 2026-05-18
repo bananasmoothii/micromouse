@@ -11,7 +11,6 @@ embassy-stm32 = { version = "0.5.0", features = ["defmt", "stm32f446re", "unstab
 embassy-sync = { version = "0.7.2", features = ["defmt"] }
 embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
 embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
-embassy-futures = { version = "0.1", features = ["defmt"] }
 
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
@@ -24,20 +23,8 @@ embedded-hal-bus = { version = "0.3", features = ["async", "defmt-03"] }
 embedded-io = { version = "0.7.1" }
 embedded-io-async = { version = "0.7.0" }
 panic-probe = { version = "1.0", features = ["print-defmt"] }
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
-heapless = { version = "0.9", default-features = false }
 critical-section = "1.1"
-nb = "1.0.0"
-embedded-storage = "0.3.1"
 embedded-alloc = "0.7"
-micromath = "2.0.0"
-async-trait = { version = "0.1", default-features = false }
-usbd-hid = "0.9.0"
-static_cell = "2"
-chrono = { version = "^0.4", default-features = false }
-
-vl53l1 = { git = "https://github.com/bananasmoothii/vl53l1", features = ["defmt"], branch = "i2c_address_changing" }
-vl53l0x = { git = "https://github.com/bananasmoothii/vl53l0x", rev = "afb05560", features = ["defmt"] }
 
 mpu9250 = { git = "https://github.com/bananasmoothii/mpu9250-forked", rev = "4bc31c80", features = ["defmt"] }
 
