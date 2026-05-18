@@ -6,7 +6,7 @@ use micromath::F32Ext;
 
 /// Physical radius of the wheels in meters (tire included).
 /// Actually empirically derived
-pub const WHEEL_RADIUS: f32 = 0.0228;
+pub const WHEEL_RADIUS: f32 = 0.0205;
 
 /// Distance between the two differential wheels in meters (track width).
 pub const WHEEL_BASE: f32 = 0.078;

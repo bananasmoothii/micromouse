@@ -114,7 +114,7 @@ async fn handle_combined_cells(
     let pct = battery_percent(battery_voltage);
     update_leds(leds, pct);
     if 1.0 < battery_voltage && battery_voltage <= 7.1 {
-        shutdown(en_pin);
+        shutdown(en_pin).await;
     } else {
         en_pin.set_high();
     }
@@ -162,7 +162,7 @@ async fn handle_two_cells(
     if (0.5 < battery_voltage1 && battery_voltage1 <= 3.3)
         || (0.5 < battery_voltage2 && battery_voltage2 <= 3.3)
     {
-        shutdown(en_pin);
+        shutdown(en_pin).await;
     } else {
         en_pin.set_high();
     }
@@ -190,8 +190,12 @@ fn update_leds(leds: &mut [Output<'static>; 4], pct: f32) {
 async fn wait_or_alert(leds: &mut [Output<'static>; 4], pct: f32) {
     if pct < 25.0 {
         let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
-            freq: 2000.hz(),
+            freq: 400.hz(),
             duration: 200.ms(),
+        });
+        let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
+            freq: 300.hz(),
+            duration: 300.ms(),
         });
         for _ in 0..5 {
             leds[0].set_high();
@@ -204,7 +208,7 @@ async fn wait_or_alert(leds: &mut [Output<'static>; 4], pct: f32) {
     }
 }
 
-fn shutdown(en_pin: &mut Output<'static>) {
+async fn shutdown(en_pin: &mut Output<'static>) {
     info!("Shutting down power output");
     for freq in INIT_MUSIC.into_iter().rev() {
         BUZZER_CHANNEL
@@ -214,5 +218,6 @@ fn shutdown(en_pin: &mut Output<'static>) {
             })
             .ok();
     }
+    500.ms_timer().await;
     en_pin.set_low();
 }
