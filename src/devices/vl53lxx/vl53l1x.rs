@@ -1,5 +1,5 @@
 use crate::devices::vl53lxx::{Config, MeasurementData};
-use crate::utils::DurationUtils;
+use crate::utils::{DurationUtils, WithInstant};
 use defmt::{Format, debug, info, trace, warn};
 use embassy_futures::select::{Either3, select3};
 use embassy_stm32::gpio::Output;
@@ -7,7 +7,7 @@ use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
 use embassy_stm32::mode::Async;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::watch::Watch;
+use embassy_sync::watch::{Receiver, Watch};
 use embassy_time::{Duration, Instant};
 use embedded_hal_bus::i2c::RefCellDevice;
 use vl53l1::RangeStatus::RANGE_VALID;
@@ -51,7 +51,8 @@ pub struct DistanceSnapshot {
 /// `N` = max number of concurrent receivers per watch. Today: straight_line wall-follow on all
 /// three watches; main maze-runner also reads MIDDLE; future wall-mapper / fusion lateral
 /// correction will add more. 4 leaves headroom without spending much RAM.
-type DistWatch = Watch<CriticalSectionRawMutex, DistanceSnapshot, 4>;
+pub type DistWatch = Watch<CriticalSectionRawMutex, WithInstant<RangingMeasurementData>, 4>;
+pub type DistReceiver<'a> = Receiver<'a, CriticalSectionRawMutex, WithInstant<RangingMeasurementData>, 4>;
 
 /// Sensor looking 45° to the left (mounted on the right side of the robot, crossed).
 pub static VL53L1X_45D_LEFT_WATCH: DistWatch = Watch::new();
@@ -260,21 +261,18 @@ pub async fn distance_sensor_task(
                     let wrapped_data = RangingMeasurementData(data);
                     sensor.last_data = wrapped_data.clone();
 
-                    if sensor.device.address() == 0x32 {
-                        // trace!(
-                        //     "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
-                        //     sensor.device.address(),
-                        //     wrapped_data.get_distance_mm(),
-                        //     raw,
-                        //     wrapped_data.get_sigma_mm(),
-                        //     wrapped_data.get_status(),
-                        // );
+                    if sensor.device.address() == 0x30 {
+                        trace!(
+                            "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
+                            sensor.device.address(),
+                            wrapped_data.get_distance_mm(),
+                            raw,
+                            wrapped_data.get_sigma_mm(),
+                            wrapped_data.get_status(),
+                        );
                     }
 
-                    watch.sender().send(DistanceSnapshot {
-                        data: wrapped_data,
-                        at: Instant::now(),
-                    });
+                    watch.sender().send(WithInstant::new(wrapped_data));
                 }
                 if let Err(e) = clear_interrupt(&mut sensor.device, &mut sensor.i2c) {
                     warn!(

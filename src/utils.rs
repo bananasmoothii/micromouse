@@ -2,7 +2,7 @@ use core::cell::Cell;
 use embassy_stm32::time::Hertz;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::RawMutex;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 
 pub trait DurationUtils {
     fn us(self) -> Duration;
@@ -106,5 +106,27 @@ impl MathUtils for f32 {
     #[inline]
     fn square(&self) -> f32 {
         self * self
+    }
+}
+
+#[derive(Clone)]
+pub struct WithInstant<T> {
+    pub data: T,
+    pub at: Instant,
+}
+
+impl<T> WithInstant<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            data,
+            at: Instant::now(),
+        }
+    }
+
+    pub fn is_newer_than(&self, duration: Duration) -> bool {
+        Instant::now()
+            .checked_duration_since(self.at)
+            .map(|d| d < duration)
+            .unwrap_or(false)
     }
 }

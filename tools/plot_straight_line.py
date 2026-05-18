@@ -31,12 +31,10 @@ FIELDS: list[tuple[str, str, type]] = [
     ("steer_p",    r"steer_p: (-?[\d.]+)",     float),
     ("steer_i",    r"steer_i: (-?[\d.]+)",     float),
     ("wall_steer", r"wall_steer: (-?[\d.]+)",  float),
-    ("l_mm",       r"\bL: (-?\d+)",            int),
-    ("l_raw",      r"\bL: -?\d+ \(raw (-?\d+)\)", int),
-    ("m_mm",       r"\bM: (-?\d+)",            int),
-    ("m_raw",      r"\bM: -?\d+ \(raw (-?\d+)\)", int),
-    ("r_mm",       r"\bR: (-?\d+)",            int),
-    ("r_raw",      r"\bR: -?\d+ \(raw (-?\d+)\)", int),
+    # L/M/R are now logged in meters (float, may be NaN). Convert to mm at use sites.
+    ("l_m",        r"\bL: (-?[\d.]+|NaN)",     float),
+    ("m_m",        r"\bM: (-?[\d.]+|NaN)",     float),
+    ("r_m",        r"\bR: (-?[\d.]+|NaN)",     float),
     ("drift_mm",   r"drift_mm: (-?[\d.]+)",    float),
     ("hdg",        r"hdg: (-?[\d.]+)deg",      float),
 ]
@@ -75,6 +73,16 @@ print(f"Parsed {len(rows)} entries.")
 
 def nan_if_neg(v):
     return float(v) if v is not None and v >= 0 else float("nan")
+
+
+def m_to_mm(v):
+    """Convert meters → mm; pass NaN/None through as NaN, and treat negatives as invalid."""
+    if v is None:
+        return float("nan")
+    f = float(v)
+    if f != f or f < 0:  # NaN or negative
+        return float("nan")
+    return f * 1000.0
 
 
 def col(name, default=None, transform=None):
@@ -116,12 +124,9 @@ steer_p    = col("steer_p")
 steer_i    = col("steer_i")
 wall_steer = col("wall_steer")
 hdg        = col("hdg")
-l_mm       = col("l_mm", transform=nan_if_neg)
-m_mm       = col("m_mm", transform=nan_if_neg)
-r_mm       = col("r_mm", transform=nan_if_neg)
-l_raw      = col("l_raw", transform=nan_if_neg)
-m_raw      = col("m_raw", transform=nan_if_neg)
-r_raw      = col("r_raw", transform=nan_if_neg)
+l_mm       = col("l_m", transform=m_to_mm)
+m_mm       = col("m_m", transform=m_to_mm)
+r_mm       = col("r_m", transform=m_to_mm)
 drift_mm   = col("drift_mm")
 
 total = rows[0]["total"]
@@ -170,15 +175,12 @@ ax2.legend(loc="upper right", fontsize=8)
 ax2.grid(True, alpha=0.4)
 
 # ── Wall-follow ToF panel ───────────────────────────────────────────────────
-plot_if(ax3, dist, l_mm,  label=f"L filt  (μ={mean(l_mm):.0f} mm)",  color="tab:blue",   marker=".", linestyle="-", linewidth=0.8)
-plot_if(ax3, dist, m_mm,  label=f"M filt  (μ={mean(m_mm):.0f} mm)",  color="tab:green",  marker=".", linestyle="-", linewidth=0.8)
-plot_if(ax3, dist, r_mm,  label=f"R filt  (μ={mean(r_mm):.0f} mm)",  color="tab:orange", marker=".", linestyle="-", linewidth=0.8)
-plot_if(ax3, dist, l_raw, label=f"L raw   (μ={mean(l_raw):.0f} mm)", color="tab:blue",   marker="x", linestyle=":",  linewidth=0.6, alpha=0.5)
-plot_if(ax3, dist, m_raw, label=f"M raw   (μ={mean(m_raw):.0f} mm)", color="tab:green",  marker="x", linestyle=":",  linewidth=0.6, alpha=0.5)
-plot_if(ax3, dist, r_raw, label=f"R raw   (μ={mean(r_raw):.0f} mm)", color="tab:orange", marker="x", linestyle=":",  linewidth=0.6, alpha=0.5)
+plot_if(ax3, dist, l_mm,  label=f"L  (μ={mean(l_mm):.0f} mm)",  color="tab:blue",   marker=".", linestyle="-", linewidth=0.8)
+plot_if(ax3, dist, m_mm,  label=f"M  (μ={mean(m_mm):.0f} mm)",  color="tab:green",  marker=".", linestyle="-", linewidth=0.8)
+plot_if(ax3, dist, r_mm,  label=f"R  (μ={mean(r_mm):.0f} mm)",  color="tab:orange", marker=".", linestyle="-", linewidth=0.8)
 plot_if(ax3, dist, drift_mm, label=f"drift (mm, +=left) (σ={σ(drift_mm):.1f}, μ={mean(drift_mm):.1f})", color="tab:red", linewidth=1.2)
 ax3.axhline(0, color="black", linewidth=0.7)
-ax3.axhline(127, color="tab:blue", linewidth=0.5, linestyle=":", alpha=0.6, label="diag centered ≈127 mm")
+ax3.axhline(127, color="tab:blue", linewidth=2.0, linestyle=":", alpha=0.6, label="diag centered ≈127 mm")
 ax3.set_ylabel("Distance (mm) / drift (mm)")
 ax3.set_xlabel("Distance (m)")
 ax3.legend(loc="upper right", fontsize=8)

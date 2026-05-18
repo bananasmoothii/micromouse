@@ -1,24 +1,24 @@
+use crate::Box;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
-use crate::devices::motors::{MIN_USABLE_SPEED, Motor};
+use crate::devices::motors::{Motor, MIN_USABLE_SPEED};
 use crate::devices::vl53lxx::vl53l1x::{
-    DistanceSnapshot, VL53L1X_45D_LEFT_WATCH, VL53L1X_45D_RIGHT_WATCH, VL53L1X_MIDDLE_WATCH,
+    DistReceiver, VL53L1X_45D_LEFT_WATCH, VL53L1X_45D_RIGHT_WATCH,
+    VL53L1X_MIDDLE_WATCH,
 };
+use crate::dimensions::{LAB_CELL, LAB_CELL_HALF, LATERAL_CLEARANCE, ROBOT_WIDTH};
 use crate::flash_log;
-use crate::positioning::CURRENT_POS;
 use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
-use crate::positioning::types::PositionState;
+use crate::positioning::CURRENT_POS;
 use crate::trajectory::{
-    FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode,
+    set_current_fusion_mode, FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS,
 };
-use crate::utils::{CellMutexUtils, DurationUtils, HertzUtils, MathUtils};
-use alloc::boxed::Box;
+use crate::utils::{CellMutexUtils, DurationUtils, MathUtils};
 use alloc::format;
-use core::f32::consts::PI;
+use core::f32::consts::{PI, SQRT_2};
 use core::sync::atomic::AtomicU32;
 use core::sync::atomic::Ordering::Relaxed;
 use embassy_stm32::peripherals::{TIM2, TIM3};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::watch::Receiver;
+use embassy_time::Duration;
 use micromath::F32Ext;
 
 const MAX_SPEED_M_S: f32 = 1.0;
@@ -41,11 +41,15 @@ const KI: f32 = 9.0;
 const MAX_INTEGRAL_CONTRIB: f32 = MAX_SPEED_M_S;
 
 /// Straight-line heading PI: keeps the robot on its initial bearing.
-/// Negated because CW rotation (right turn) increases theta on this hardware (gyro z-axis down).
-const KP_STEERING: f32 = 0.4;
-const KI_STEERING: f32 = 1.5; // (m/s) per (rad·s) of accumulated heading error
-const MAX_STEERING_INTEGRAL: f32 = 0.1; // caps integral wind-up at ~±0.1 m/s authority
-const MAX_STEERING: f32 = 0.30;
+/// Steering is a dimensionless wheel-speed asymmetry (see `set_speed_steered`); negated because
+/// CW rotation increases theta on this hardware.
+const KP_STEERING: f32 = 1.5;
+const KI_STEERING: f32 = 3.0;
+const MAX_STEERING_INTEGRAL: f32 = 0.15;
+const MAX_STEERING: f32 = 0.40;
+
+/// per tick
+const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 5.0;
 
 /// Minimum commanded speed during deceleration — lower than MIN_USABLE_SPEED so friction dominates.
 /// Requires the MIN_USABLE_PWM snap in motors.rs to be removed.
@@ -133,13 +137,36 @@ impl TrajectorySegment for StraightLine {
 
             // Heading error: how much the robot has rotated from its initial direction.
             // Normalized to ±π so wrap-around near ±180° doesn't produce spurious corrections.
-            let mut heading_error = Self::get_heading_error(
-                initial_theta,
-                &mut left_rcv,
-                &mut right_rcv,
-                &mut middle_rcv,
-                current_pos,
-            );
+
+            let left_dist = Self::get_wall_dist(&mut left_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
+            let right_dist = Self::get_wall_dist(&mut right_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
+
+            let mut heading_error = current_pos.theta - initial_theta;
+
+            // change heading_error if necessary
+            match (left_dist, right_dist) {
+                (None, None) => {}
+                (Some(d), None) => {
+                    let remaining = (d - ROBOT_WIDTH / 2.0).max(0.0);
+                    if remaining < LATERAL_CLEARANCE {
+                        heading_error = -SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
+                            * (LATERAL_CLEARANCE - remaining)
+                            / LATERAL_CLEARANCE;
+                    }
+                }
+                (None, Some(d)) => {
+                    let remaining = (d - ROBOT_WIDTH / 2.0).max(0.0);
+                    if remaining < LATERAL_CLEARANCE {
+                        heading_error = SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
+                            * (LATERAL_CLEARANCE - remaining)
+                            / LATERAL_CLEARANCE;
+                    }
+                }
+                (Some(d_left), Some(d_right)) => {
+                    let difference = d_right - d_left;
+                }
+            }
+
             if heading_error > PI {
                 heading_error -= 2.0 * PI;
             }
@@ -211,27 +238,25 @@ impl TrajectorySegment for StraightLine {
                 pi_out.clamp(sign * min_speed, sign * 1.5 * MAX_SPEED_M_S)
             };
             let active_steering = if in_brake { 0.0 } else { steering };
-            // flash_log!(
-            //     "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, wall_steer: {}, L: {} M: {} R: {} (drift_mm: {}), hdg: {}deg",
-            //     format!("{:.2}", distance).as_str(),
-            //     format!("{:.2}", self.distance).as_str(),
-            //     format!("{:.2}", target_speed).as_str(),
-            //     if in_decel { " (decel)" } else { "" },
-            //     format!("{:.2}", current_pos.v_forward).as_str(),
-            //     format!("{:.2}", speed_error).as_str(),
-            //     format!("{:.2}", commanded_speed).as_str(),
-            //     format!("{:.4}", p).as_str(),
-            //     format!("{:.4}", i).as_str(),
-            //     format!("{:.4}", active_steering).as_str(),
-            //     format!("{:.4}", steer_p).as_str(),
-            //     format!("{:.4}", steer_i).as_str(),
-            //     format!("{:.4}", wall_steer).as_str(),
-            //     left_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
-            //     middle_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
-            //     right_m.map(|m| (m * 1000.0) as i32).unwrap_or(-1),
-            //     format!("{:.1}", drift_m * 1000.0).as_str(),
-            //     format!("{:.1}", heading_error.to_degrees()).as_str(),
-            // );
+            flash_log!(
+                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, L: {} M: {} R: {}, hdg: {}deg",
+                format!("{:.2}", distance).as_str(),
+                format!("{:.2}", self.distance).as_str(),
+                format!("{:.2}", target_speed).as_str(),
+                if in_decel { " (decel)" } else { "" },
+                format!("{:.2}", current_pos.v_forward).as_str(),
+                format!("{:.2}", speed_error).as_str(),
+                format!("{:.2}", commanded_speed).as_str(),
+                format!("{:.4}", p).as_str(),
+                format!("{:.4}", i).as_str(),
+                format!("{:.4}", active_steering).as_str(),
+                format!("{:.4}", steer_p).as_str(),
+                format!("{:.4}", steer_i).as_str(),
+                format!("{:.3}", left_dist.unwrap_or(f32::NAN)).as_str(),
+                0,
+                format!("{:.3}", right_dist.unwrap_or(f32::NAN)).as_str(),
+                format!("{:.1}", heading_error.to_degrees()).as_str(),
+            );
 
             motors.set_speed_steered(commanded_speed, active_steering);
 
@@ -241,15 +266,16 @@ impl TrajectorySegment for StraightLine {
     }
 }
 
+const STALE_MEASUREMENT: Duration = Duration::from_millis(200);
+const FOLLOWED_WALL_MAX_DIST: f32 = LAB_CELL - ROBOT_WIDTH;
+
 impl StraightLine {
-    fn get_heading_error(
-        initial_theta: f32,
-        left_rcv: &mut Receiver<CriticalSectionRawMutex, DistanceSnapshot, 4>,
-        right_rcv: &mut Receiver<CriticalSectionRawMutex, DistanceSnapshot, 4>,
-        middle_rcv: &mut Receiver<CriticalSectionRawMutex, DistanceSnapshot, 4>,
-        current_pos: PositionState,
-    ) -> f32 {
-        current_pos.theta - initial_theta
+    /// Gets the distance in meters to the wall if data is fresh enough.
+    /// Distance is returned straight, not diagonal.
+    fn get_wall_dist(rcv: &mut DistReceiver) -> Option<f32> {
+        rcv.try_get()
+            .filter(|it| it.is_newer_than(STALE_MEASUREMENT))
+            .map(|snap| snap.data.0.range_milli_meter as f32 / 1000.0 / SQRT_2)
     }
 }
 
@@ -264,10 +290,14 @@ impl Motors<'_, '_> {
         self.motor_right.set_speed(speed);
     }
 
-    /// Apply base speed with a steering correction: left gets -steering, right gets +steering.
-    /// Positive steering turns left (right wheel faster); negative turns right.
+    /// Apply base speed with a multiplicative steering correction:
+    ///   left  = speed * (1 - steering)
+    ///   right = speed * (1 + steering)
+    /// `steering` is a dimensionless fraction. Positive turns left (right wheel faster);
+    /// negative turns right. Curvature is constant per steering unit; correction authority
+    /// scales with speed so the controller doesn't over-rotate when slowing down.
     fn set_speed_steered(&mut self, speed: f32, steering: f32) {
-        self.motor_left.set_speed(speed - steering);
-        self.motor_right.set_speed(speed + steering);
+        self.motor_left.set_speed(speed * (1.0 - steering));
+        self.motor_right.set_speed(speed * (1.0 + steering));
     }
 }

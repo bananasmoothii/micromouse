@@ -21,7 +21,7 @@ use embassy_time::Instant;
 
 /// Master switch.  When `false`: `flash_log!` is a no-op (no RTT print, no RAM buffer write),
 /// and `startup_dump`/`flush` return immediately without touching flash.
-pub const ENABLED: bool = false;
+pub const ENABLED: bool = true;
 
 const SECTOR_OFFSET: u32 = 0x0006_0000; // sector 7 start, relative to flash base
 const SECTOR_SIZE: u32 = 128 * 1024;
@@ -99,7 +99,7 @@ pub fn startup_dump(flash: &mut Flash<'_, Blocking>) {
         return;
     }
 
-    info!("=== flash log from previous run ===");
+    info!("======== flash log from previous run ========");
     let mut count = 0u32;
     let mut offset = WRITE_SIZE; // skip 4-byte magic
     loop {
@@ -126,7 +126,7 @@ pub fn startup_dump(flash: &mut Flash<'_, Blocking>) {
         count += 1;
         offset += WRITE_SIZE + padded;
     }
-    info!("=== end — {} entries (sector kept, will be erased on next flush) ===", count);
+    info!("======== end — {} entries (sector kept, will be erased on next flush) ========", count);
     let _ = flash; // consumed for API symmetry; erase deferred to flush()
 }
 

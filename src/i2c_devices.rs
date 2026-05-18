@@ -28,7 +28,8 @@ pub async fn init_i2c_devices(
 ) {
     let mut i2c_config = Config::default();
     // Use 100kHz for more reliable communication when we don't have pull-up resistors
-    i2c_config.frequency = 200.khz();
+    // lol we now have pull-up resistors and motors still prevent I2C communication due to tension drop I guess
+    i2c_config.frequency = 100.khz();
     i2c_config.gpio_speed = Speed::High;
     i2c_config.timeout = Duration::from_millis(50);
 
