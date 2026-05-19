@@ -1,10 +1,11 @@
 use crate::devices::hall_sensor_3144::{LEFT_TICK_INTERVAL_US, RIGHT_TICK_INTERVAL_US};
 use crate::positioning::mpu::MpuResult;
 use crate::positioning::types::{MovementDelta, PositionState};
-use crate::trajectory::FusionMode;
 use core::f32::consts::PI;
 use core::sync::atomic::Ordering;
+use Ordering::Relaxed;
 use micromath::F32Ext;
+use crate::utils::MathUtils;
 
 // Note: this is NOT a proper EKF. A real EKF maintains a full [x, y, θ] state vector with a 3×3
 // covariance matrix and propagates uncertainty through the nonlinear motion model via a Jacobian.
@@ -41,11 +42,11 @@ const MAX_D_THETA_PER_STEP: f32 = 0.70;
 /// On a straight, both wheels roll without lateral slip so odometry heading is trustworthy.
 const R_THETA_ODOM_STRAIGHT: f32 = 0.5;
 
-/// Measurement noise when using odometry as a heading source — pivot turn.
-/// During a pivot the wheels scrub laterally: the geometric WHEEL_BASE underestimates the
-/// kinematic turning radius, so odometry consistently over-reports rotation. The gyro measures
-/// actual angular rate directly and is the ground truth here; odometry is effectively ignored.
-const R_THETA_ODOM_PIVOT: f32 = 50.0;
+/// Scales how fast odometry heading noise grows with angular rate.
+/// R_odom = R_THETA_ODOM_STRAIGHT * (1 + SKID_K * ω²)
+/// Derived so that at ω ≈ 13 rad/s (pivot turn) R reaches ~50 (gyro fully dominates):
+///   (50 / 0.5 - 1) / 13² = 99 / 169 ≈ 0.586
+const SKID_K: f32 = 0.586;
 
 /// Measurement noise when using the magnetometer as a heading source.
 /// Motor current changes the local hard iron field during operation, causing ~30–80° of error
@@ -90,11 +91,9 @@ impl SensorFusion {
         }
     }
 
-    pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult, mode: FusionMode) -> PositionState {
-        let r_theta_odom = match mode {
-            FusionMode::Pivot => R_THETA_ODOM_PIVOT,
-            _ => R_THETA_ODOM_STRAIGHT,
-        };
+    pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult) -> PositionState {
+        let omega = if mpu.dt > 0.0 { mpu.d_theta.abs() / mpu.dt } else { 0.0 };
+        let r_theta_odom = R_THETA_ODOM_STRAIGHT * (1.0 + SKID_K * omega.square());
         // --- Heading Kalman filter ---
 
         // Predict: gyro gives us d_theta directly; uncertainty grows by Q_THETA_GYRO.
@@ -106,8 +105,8 @@ impl SensorFusion {
         // Update from odometry — only once both wheels have seen at least two consecutive ticks
         // (interval > 0). Before that, a single tick looks like a ~46° turn on a straight line;
         // gyro-only is far more accurate during those first few revolutions.
-        let odom_synced = LEFT_TICK_INTERVAL_US.load(Ordering::Relaxed) > 0
-            && RIGHT_TICK_INTERVAL_US.load(Ordering::Relaxed) > 0;
+        let odom_synced = LEFT_TICK_INTERVAL_US.load(Relaxed) > 0
+            && RIGHT_TICK_INTERVAL_US.load(Relaxed) > 0;
         if odom_synced {
             let k_theta_odom = self.p_theta_gyro / (self.p_theta_gyro + r_theta_odom);
             self.state.theta += k_theta_odom * (odom_delta.d_theta - mpu.d_theta);

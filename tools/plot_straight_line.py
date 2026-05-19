@@ -37,6 +37,7 @@ FIELDS: list[tuple[str, str, type]] = [
     ("r_m",        r"\bR: (-?[\d.]+|NaN)",     float),
     ("drift_mm",   r"drift_mm: (-?[\d.]+)",    float),
     ("hdg",        r"hdg: (-?[\d.]+)deg",      float),
+    ("theta",      r"theta: (-?[\d.]+)deg",    float),
 ]
 FIELDS_COMPILED = [(name, re.compile(pat), cast) for name, pat, cast in FIELDS]
 
@@ -128,6 +129,7 @@ l_mm       = col("l_m", transform=m_to_mm)
 m_mm       = col("m_m", transform=m_to_mm)
 r_mm       = col("r_m", transform=m_to_mm)
 drift_mm   = col("drift_mm")
+theta      = col("theta")
 
 total = rows[0]["total"]
 decel_start = next((r["dist"] for r in rows if r.get("decel")), None)
@@ -169,6 +171,7 @@ plot_if(ax2, dist, [v * 10 for v in steer_p]    if steer_p    else None, label="
 plot_if(ax2, dist, [v * 10 for v in steer_i]    if steer_i    else None, label="steer_i ×10",   color="tab:pink",   linestyle="--")
 plot_if(ax2, dist, [v * 10 for v in wall_steer] if wall_steer else None, label=f"wall_steer ×10 (μ={mean(wall_steer):.3f})", color="tab:gray", linestyle="--")
 plot_if(ax2, dist, [h / 10 for h in hdg]        if hdg        else None, label="heading error (deg / 10)", color="tab:olive")
+plot_if(ax2, dist, [t / 10 for t in theta]      if theta      else None, label="theta (deg / 10)",          color="tab:cyan",   linestyle="-.")
 ax2.axhline(0, color="black", linewidth=0.7)
 ax2.set_ylabel("m/s")
 ax2.legend(loc="upper right", fontsize=8)

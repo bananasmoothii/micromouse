@@ -3,7 +3,7 @@ use crate::devices::motors::Motor;
 use crate::flash_log;
 use crate::positioning::CURRENT_POS;
 use crate::positioning::odometry::WHEEL_BASE;
-use crate::trajectory::{FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS, set_current_fusion_mode};
+use crate::trajectory::{TrajectorySegment, UPDATE_INTERVAL_MS};
 use crate::utils::{CellMutexUtils, DurationUtils};
 use alloc::format;
 use core::f32::consts::PI;
@@ -53,16 +53,11 @@ impl InPlaceTurn {
 
 #[async_trait::async_trait]
 impl TrajectorySegment for InPlaceTurn {
-    fn fusion_mode(&self) -> FusionMode {
-        FusionMode::Pivot
-    }
-
     async fn execute<'a>(
         &self,
         motor_left: &mut Motor<'a, TIM3>,
         motor_right: &mut Motor<'a, TIM2>,
     ) {
-        set_current_fusion_mode(FusionMode::Pivot);
         let start_pos = CURRENT_POS.get();
         let dt = UPDATE_INTERVAL_MS as f32 / 1000.0;
         let mut angle_integral = 0.0f32;
@@ -92,7 +87,6 @@ impl TrajectorySegment for InPlaceTurn {
             if angle_remaining.abs() <= coast_estimate.max(DONE_THRESHOLD_MIN_RAD) {
                 motor_left.set_speed(0.0);
                 motor_right.set_speed(0.0);
-                // set_current_fusion_mode(FusionMode::Idle);
                 flash_log!(
                     "InPlaceTurn done: target {}deg, final error {}deg",
                     format!("{:.1}", self.angle.to_degrees()).as_str(),

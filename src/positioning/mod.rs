@@ -12,7 +12,6 @@ use crate::utils::{CellMutexUtils, DurationUtils};
 use defmt::{debug, error, warn};
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
 use crate::positioning::odometry::get_odom_delta;
-use crate::trajectory::{get_current_fusion_mode};
 use core::sync::atomic::Ordering;
 
 /// `v_forward` is the EMA-smoothed tick-count velocity: ticks accumulated over the 20 ms fusion
@@ -86,8 +85,7 @@ pub async fn positioning_task(mpu: &'static mut Mpu9250Sensor) {
             );
         }
 
-        let mode = get_current_fusion_mode();
-        let state = fusion_proc.update(odom_delta, mpu_result, mode);
+        let state = fusion_proc.update(odom_delta, mpu_result);
         CURRENT_POS.set(state);
 
         if !state.x.is_finite() || !state.y.is_finite() || !state.theta.is_finite() || !state.v_forward.is_finite() {

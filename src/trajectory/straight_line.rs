@@ -46,7 +46,7 @@ const MAX_STEERING_INTEGRAL: f32 = 0.15;
 const MAX_STEERING: f32 = 0.20;
 
 /// per tick
-const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 0.4;
+const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 0.45;
 const MAX_SINGLE_WALL_STEERING: f32 = 0.3;
 
 /// Minimum commanded speed during deceleration — lower than MIN_USABLE_SPEED so friction dominates.
@@ -143,12 +143,30 @@ impl TrajectorySegment for StraightLine {
             let mut heading_error = current_pos.theta - initial_theta;
 
             // change heading_error if necessary
-            if let Some(d) = left_dist {
-                Self::set_heading_error(d, &mut heading_error);
+            match (left_dist, right_dist) {
+                (Some(d), None) => {
+                    if let Some(h) = Self::get_heading_error(d) {
+                        heading_error = h;
+                    }
+                }
+                (None, Some(d)) => {
+                    if let Some(h) = Self::get_heading_error(d) {
+                        heading_error = -h; // invert (heading error is opposed to where we want to go)
+                    }
+                }
+                (Some(ld), Some(rd)) => {
+                    // add both
+                    if let Some(h) = Self::get_heading_error(ld) {
+                        heading_error = h;
+                    }
+                    if let Some(h) = Self::get_heading_error(rd) {
+                        heading_error -= h;
+                    }
+                }
+                (None, None) => {}
             }
-            if let Some(d) = right_dist {
-                Self::set_heading_error(d, &mut heading_error);
-                heading_error *= -1.0; // invert
+            if left_dist.is_some() || right_dist.is_some() {
+                heading_error = heading_error.clamp(-MAX_SINGLE_WALL_STEERING, MAX_SINGLE_WALL_STEERING);
             }
 
             if heading_error > PI {
@@ -222,7 +240,7 @@ impl TrajectorySegment for StraightLine {
             };
             let active_steering = if in_brake { 0.0 } else { steering };
             flash_log!(
-                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, L: {} M: {} R: {}, hdg: {}deg",
+                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, L: {} M: {} R: {}, hdg: {}deg, theta: {}deg",
                 format!("{:.2}", distance).as_str(),
                 format!("{:.2}", self.distance).as_str(),
                 format!("{:.2}", target_speed).as_str(),
@@ -239,6 +257,7 @@ impl TrajectorySegment for StraightLine {
                 0,
                 format!("{:.3}", right_dist.unwrap_or(f32::NAN)).as_str(),
                 format!("{:.1}", heading_error.to_degrees()).as_str(),
+                format!("{:.1}", current_pos.theta.to_degrees()).as_str(),
             );
 
             motors.set_speed_steered(commanded_speed, active_steering);
@@ -250,7 +269,7 @@ impl TrajectorySegment for StraightLine {
     }
 }
 
-const STALE_MEASUREMENT: Duration = Duration::from_millis(200);
+const SIDE_WALL_STALE_MEASUREMENT: Duration = Duration::from_millis(70);
 const FOLLOWED_WALL_MAX_DIST: f32 = LAB_CELL - ROBOT_WIDTH;
 
 impl StraightLine {
@@ -258,16 +277,18 @@ impl StraightLine {
     /// Distance is returned straight, not diagonal.
     fn get_wall_dist(rcv: &mut DistReceiver) -> Option<f32> {
         rcv.try_get()
-            .filter(|it| it.is_newer_than(STALE_MEASUREMENT))
+            .filter(|it| it.is_newer_than(SIDE_WALL_STALE_MEASUREMENT))
             .map(|snap| snap.data.0.range_milli_meter as f32 / 1000.0 / SQRT_2)
     }
 
-    fn set_heading_error(distance_middle_to_wall: f32, heading_error: &mut f32) {
+    fn get_heading_error(distance_middle_to_wall: f32) -> Option<f32> {
         let remaining = (distance_middle_to_wall - ROBOT_WIDTH / 2.0).max(0.0);
         if remaining < LATERAL_CLEARANCE {
-            *heading_error = SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
+            Some(SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
                 * (LATERAL_CLEARANCE - remaining)
-                / LATERAL_CLEARANCE;
+                / LATERAL_CLEARANCE)
+        } else {
+            None
         }
     }
 }
