@@ -181,6 +181,7 @@ plot_if(ax3, dist, r_mm,  label=f"R  (μ={mean(r_mm):.0f} mm)",  color="tab:oran
 plot_if(ax3, dist, drift_mm, label=f"drift (mm, +=left) (σ={σ(drift_mm):.1f}, μ={mean(drift_mm):.1f})", color="tab:red", linewidth=1.2)
 ax3.axhline(0, color="black", linewidth=0.7)
 ax3.axhline(127, color="tab:blue", linewidth=2.0, linestyle=":", alpha=0.6, label="diag centered ≈127 mm")
+ax3.set_ylim(0, 500)
 ax3.set_ylabel("Distance (mm) / drift (mm)")
 ax3.set_xlabel("Distance (m)")
 ax3.legend(loc="upper right", fontsize=8)

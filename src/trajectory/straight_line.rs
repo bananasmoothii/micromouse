@@ -1,24 +1,21 @@
 use crate::Box;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
-use crate::devices::motors::{Motor, MIN_USABLE_SPEED};
+use crate::devices::motors::{MIN_USABLE_SPEED, Motor};
 use crate::devices::vl53lxx::vl53l1x::{
-    DistReceiver, VL53L1X_45D_LEFT_WATCH, VL53L1X_45D_RIGHT_WATCH,
-    VL53L1X_MIDDLE_WATCH,
+    DistReceiver, VL53L1X_45D_LEFT_WATCH, VL53L1X_45D_RIGHT_WATCH, VL53L1X_MIDDLE_WATCH,
 };
 use crate::dimensions::{LAB_CELL, LAB_CELL_HALF, LATERAL_CLEARANCE, ROBOT_WIDTH};
 use crate::flash_log;
-use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
 use crate::positioning::CURRENT_POS;
-use crate::trajectory::{
-    set_current_fusion_mode, FusionMode, TrajectorySegment, UPDATE_INTERVAL_MS,
-};
-use crate::utils::{CellMutexUtils, DurationUtils, MathUtils};
+use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
+use crate::trajectory::{TrajectorySegment, UPDATE_INTERVAL_MS};
+use crate::utils::{CellMutexUtils, MathUtils};
 use alloc::format;
 use core::f32::consts::{PI, SQRT_2};
 use core::sync::atomic::AtomicU32;
 use core::sync::atomic::Ordering::Relaxed;
 use embassy_stm32::peripherals::{TIM2, TIM3};
-use embassy_time::Duration;
+use embassy_time::{Duration, Instant, Timer};
 use micromath::F32Ext;
 
 const MAX_SPEED_M_S: f32 = 1.0;
@@ -43,13 +40,14 @@ const MAX_INTEGRAL_CONTRIB: f32 = MAX_SPEED_M_S;
 /// Straight-line heading PI: keeps the robot on its initial bearing.
 /// Steering is a dimensionless wheel-speed asymmetry (see `set_speed_steered`); negated because
 /// CW rotation increases theta on this hardware.
-const KP_STEERING: f32 = 1.5;
-const KI_STEERING: f32 = 3.0;
+const KP_STEERING: f32 = 0.8;
+const KI_STEERING: f32 = 2.0;
 const MAX_STEERING_INTEGRAL: f32 = 0.15;
-const MAX_STEERING: f32 = 0.40;
+const MAX_STEERING: f32 = 0.20;
 
 /// per tick
-const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 5.0;
+const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 0.4;
+const MAX_SINGLE_WALL_STEERING: f32 = 0.3;
 
 /// Minimum commanded speed during deceleration — lower than MIN_USABLE_SPEED so friction dominates.
 /// Requires the MIN_USABLE_PWM snap in motors.rs to be removed.
@@ -78,16 +76,11 @@ pub struct StraightLine {
 
 #[async_trait::async_trait]
 impl TrajectorySegment for StraightLine {
-    fn fusion_mode(&self) -> FusionMode {
-        FusionMode::Straight
-    }
-
     async fn execute<'a>(
         &self,
         motor_left: &mut Motor<'a, TIM3>,
         motor_right: &mut Motor<'a, TIM2>,
     ) {
-        set_current_fusion_mode(FusionMode::Straight);
         let mut motors = Motors {
             motor_left,
             motor_right,
@@ -127,6 +120,12 @@ impl TrajectorySegment for StraightLine {
         let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
         let mut in_decel = false;
 
+        // Fixed-cadence control loop: wake on absolute deadlines so iteration period stays at
+        // UPDATE_INTERVAL_MS regardless of work time inside the loop. If work overruns the
+        // period, Timer::at returns immediately and we re-align on the next tick.
+        let period = Duration::from_millis(UPDATE_INTERVAL_MS);
+        let mut next_tick = Instant::now() + period;
+
         loop {
             let current_pos = CURRENT_POS.get();
             let left_ticks = LEFT_TICKS_CUMULATIVE.load(Relaxed) - left_ticks_start;
@@ -144,27 +143,12 @@ impl TrajectorySegment for StraightLine {
             let mut heading_error = current_pos.theta - initial_theta;
 
             // change heading_error if necessary
-            match (left_dist, right_dist) {
-                (None, None) => {}
-                (Some(d), None) => {
-                    let remaining = (d - ROBOT_WIDTH / 2.0).max(0.0);
-                    if remaining < LATERAL_CLEARANCE {
-                        heading_error = -SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
-                            * (LATERAL_CLEARANCE - remaining)
-                            / LATERAL_CLEARANCE;
-                    }
-                }
-                (None, Some(d)) => {
-                    let remaining = (d - ROBOT_WIDTH / 2.0).max(0.0);
-                    if remaining < LATERAL_CLEARANCE {
-                        heading_error = SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
-                            * (LATERAL_CLEARANCE - remaining)
-                            / LATERAL_CLEARANCE;
-                    }
-                }
-                (Some(d_left), Some(d_right)) => {
-                    let difference = d_right - d_left;
-                }
+            if let Some(d) = left_dist {
+                Self::set_heading_error(d, &mut heading_error);
+            }
+            if let Some(d) = right_dist {
+                Self::set_heading_error(d, &mut heading_error);
+                heading_error *= -1.0; // invert
             }
 
             if heading_error > PI {
@@ -191,7 +175,6 @@ impl TrajectorySegment for StraightLine {
                 );
                 motors.set_speed(self.out_speed);
                 // keep straight in case out_speed != 0
-                // set_current_fusion_mode(FusionMode::Idle);
                 break;
             }
 
@@ -260,7 +243,8 @@ impl TrajectorySegment for StraightLine {
 
             motors.set_speed_steered(commanded_speed, active_steering);
 
-            UPDATE_INTERVAL_MS.ms_timer().await;
+            Timer::at(next_tick).await;
+            next_tick += period;
         }
         HEADING_INTEGRAL.store(heading_integral.to_bits(), Relaxed);
     }
@@ -276,6 +260,15 @@ impl StraightLine {
         rcv.try_get()
             .filter(|it| it.is_newer_than(STALE_MEASUREMENT))
             .map(|snap| snap.data.0.range_milli_meter as f32 / 1000.0 / SQRT_2)
+    }
+
+    fn set_heading_error(distance_middle_to_wall: f32, heading_error: &mut f32) {
+        let remaining = (distance_middle_to_wall - ROBOT_WIDTH / 2.0).max(0.0);
+        if remaining < LATERAL_CLEARANCE {
+            *heading_error = SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
+                * (LATERAL_CLEARANCE - remaining)
+                / LATERAL_CLEARANCE;
+        }
     }
 }
 
