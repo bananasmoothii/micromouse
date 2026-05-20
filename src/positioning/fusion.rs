@@ -1,4 +1,4 @@
-use crate::devices::hall_sensor_3144::{LEFT_TICK_INTERVAL_US, RIGHT_TICK_INTERVAL_US};
+use crate::devices::hall_sensor_3144::{LEFT_TICK_INTERVAL_CYCLES, RIGHT_TICK_INTERVAL_CYCLES};
 use crate::positioning::mpu::MpuResult;
 use crate::positioning::types::{MovementDelta, PositionState};
 use core::f32::consts::PI;
@@ -104,10 +104,12 @@ impl SensorFusion {
         self.p_theta_gyro += Q_THETA_GYRO;
 
         // Update from odometry — only once both wheels have seen at least two consecutive ticks
-        // (interval > 0). Before that, a single tick looks like a ~46° turn on a straight line;
-        // gyro-only is far more accurate during those first few revolutions.
-        let odom_synced = LEFT_TICK_INTERVAL_US.load(Relaxed) > 0
-            && RIGHT_TICK_INTERVAL_US.load(Relaxed) > 0;
+        // (interval > 0). Before that, an imbalanced single tick on one wheel looks like a
+        // ~7.7° spurious turn (1 tick ≈ 10.5 mm of wheel travel ÷ 78 mm track), which is
+        // still much larger than per-step gyro noise. Gyro-only is more accurate during
+        // the first revolution after a stop.
+        let odom_synced = LEFT_TICK_INTERVAL_CYCLES.load(Relaxed) > 0
+            && RIGHT_TICK_INTERVAL_CYCLES.load(Relaxed) > 0;
         if odom_synced {
             let k_theta_odom = self.p_theta_gyro / (self.p_theta_gyro + r_theta_odom);
             self.state.theta += k_theta_odom * (odom_delta.d_theta - mpu.d_theta);

@@ -129,7 +129,7 @@ impl VL53L1XSensor {
 
         // SWRST forces BSY=0 and releases SCL/SDA from the peripheral side
         pac::I2C1.cr1().modify(|w| w.set_swrst(true));
-        cortex_m::asm::delay(900_000); // ~5 ms at 180 MHz — bus settles
+        cortex_m::asm::delay(420_000); // ~5 ms at 84 MHz — bus settles
         pac::I2C1.cr1().modify(|w| w.set_swrst(false));
 
         // CCR and TRISE require PE=0 to write; SWRST leaves PE=0

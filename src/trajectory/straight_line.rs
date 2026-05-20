@@ -19,6 +19,7 @@ use embassy_stm32::peripherals::{TIM2, TIM3};
 use embassy_time::{Duration, Instant, Timer};
 use micromath::F32Ext;
 
+// consider also changing MIN_PULSE_WIDTH_CYCLES in hall_sensor_3144.rs if you change this
 const MAX_SPEED_M_S: f32 = 1.0;
 
 // --- Speed controller: position-form PI ---
@@ -152,6 +153,10 @@ impl TrajectorySegment for StraightLine {
         let mut in_decel = false;
         let mut left_rate_buf = WallRateBuffer::new();
         let mut right_rate_buf = WallRateBuffer::new();
+        // ToF-based remaining for DistanceToFrontWall: updated on each fresh M reading,
+        // extrapolated via encoder delta between readings to sidestep encoder slip.
+        let mut tof_remaining_m: Option<f32> = None;
+        let mut distance_at_tof = 0.0f32;
 
         // Fixed-cadence control loop: wake on absolute deadlines so iteration period stays at
         // UPDATE_INTERVAL_MS regardless of work time inside the loop. If work overruns the
@@ -179,6 +184,8 @@ impl TrajectorySegment for StraightLine {
                     last_front_at = Some(snap.at);
                     let d_front = snap.data.0.range_milli_meter as f32 / 1000.0;
                     let remaining = (d_front - *stop_offset).max(0.0);
+                    tof_remaining_m = Some(remaining);
+                    distance_at_tof = distance;
                     total_distance = distance + remaining;
                     target_ticks = (total_distance / DISTANCE_PER_TICK).round() as i32;
                     let ddf = (MAX_SPEED_M_S.square() - self.out_speed.square())
@@ -195,7 +202,21 @@ impl TrajectorySegment for StraightLine {
                 }
             }
 
-            if avg_ticks >= target_ticks {
+            // Best estimate of remaining distance to stop:
+            // For DistanceToFrontWall with a valid ToF reading: ToF remaining minus encoder delta
+            // since that reading (over-counts, but error resets every ~66 ms on next reading).
+            // For Distance or stale M: encoder-based (original behaviour).
+            let effective_remaining = match (&self.goal, tof_remaining_m) {
+                (StraightLineGoal::DistanceToFrontWall(_), Some(r)) => {
+                    (r - (distance - distance_at_tof)).max(0.0)
+                }
+                _ => total_distance - distance,
+            };
+
+            let tof_stop = matches!(&self.goal, StraightLineGoal::DistanceToFrontWall(_))
+                && tof_remaining_m.is_some()
+                && effective_remaining <= 0.01;
+            if avg_ticks >= target_ticks || tof_stop {
                 flash_log!(
                     "Distance reached: left {} ticks ({} turns), right {} ticks ({} turns), speed error: {}",
                     left_ticks,
@@ -214,10 +235,24 @@ impl TrajectorySegment for StraightLine {
                 .sqrt()
                 .min(max_reachable_speed);
 
-            // Deceleration ramp: distance-based, always reaches out_speed at self.distance.
-            // Integral resets once on decel entry to clear cruise windup.
-            // Deceleration always takes precedence (min of both ramps).
-            let decel_target = if distance >= decel_start_distance {
+            // Deceleration ramp: always reaches out_speed at the stop point.
+            // For DistanceToFrontWall with a valid ToF reading: driven by effective_remaining
+            // (ToF truth, extrapolated by encoder between readings) so encoder slip cannot
+            // cause the ramp to fire late or the robot to blow through the target.
+            // For Distance or stale M: original encoder-based ramp, unchanged.
+            let decel_target = if matches!(&self.goal, StraightLineGoal::DistanceToFrontWall(_))
+                && tof_remaining_m.is_some()
+            {
+                if effective_remaining <= decel_distance {
+                    if !in_decel {
+                        in_decel = true;
+                        speed_integral *= DECEL_I_FACTOR;
+                    }
+                    (max_reachable_speed * effective_remaining / decel_distance).max(MIN_USABLE_SPEED)
+                } else {
+                    f32::INFINITY
+                }
+            } else if distance >= decel_start_distance {
                 if !in_decel {
                     in_decel = true;
                     speed_integral *= DECEL_I_FACTOR;

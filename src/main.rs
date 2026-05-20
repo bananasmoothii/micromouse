@@ -38,7 +38,7 @@ use embassy_stm32::timer::Channel;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::{bind_interrupts, interrupt};
-use embassy_stm32::{i2c, spi};
+use embassy_stm32::{i2c, spi, rcc};
 use embedded_alloc::LlffHeap as Heap;
 use crate::i2c_devices::init_i2c_devices;
 use crate::trajectory::in_place_turn::InPlaceTurn;
@@ -66,7 +66,28 @@ async fn main(mut spawner: Spawner) {
         embedded_alloc::init!(HEAP, HEAP_SIZE);
     }
 
-    let p = embassy_stm32::init(Default::default());
+    // SYSCLK = 84 MHz from HSI 16 MHz via PLL (VCO=168 MHz, /2 = 84 MHz).
+    // APB1 = 42 MHz (max 45), APB2 = 84 MHz (max 90). VOS=SCALE1 + over-drive
+    // are set automatically by embassy when a PLL is configured.
+    // If CYCLES_PER_US in devices/hall_sensor_3144.rs is ever recomputed by hand,
+    // it must match SYSCLK / 1_000_000.
+    let mut rcc_config = rcc::Config::default();
+    rcc_config.hsi = true;
+    rcc_config.pll_src = rcc::PllSource::HSI;
+    rcc_config.pll = Some(rcc::Pll {
+        prediv: rcc::PllPreDiv::DIV16,
+        mul: rcc::PllMul::MUL168,
+        divp: Some(rcc::PllPDiv::DIV2),
+        divq: Some(rcc::PllQDiv::DIV7),
+        divr: None,
+    });
+    rcc_config.sys = rcc::Sysclk::PLL1_P;
+    rcc_config.ahb_pre = rcc::AHBPrescaler::DIV1;
+    rcc_config.apb1_pre = rcc::APBPrescaler::DIV2;
+    rcc_config.apb2_pre = rcc::APBPrescaler::DIV1;
+    let mut stm_config = embassy_stm32::Config::default();
+    stm_config.rcc = rcc_config;
+    let p = embassy_stm32::init(stm_config);
 
     start_battery_monitoring(
         &spawner,
