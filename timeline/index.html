@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Micromouse — Project Timeline</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+    <div class="header-brand">
+        <svg class="header-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2C8 2 5 5 5 9c0 2 .8 3.8 2 5l-2 6h14l-2-6c1.2-1.2 2-3 2-5 0-4-3-7-7-7z"/>
+            <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/>
+        </svg>
+        <span class="header-title">Micromouse&thinsp;·&thinsp;Timeline</span>
+    </div>
+
+    <nav class="legend" id="legend" aria-label="Repositories"></nav>
+
+    <div class="header-actions">
+        <div class="zoom-group" role="group" aria-label="Zoom">
+            <button class="zoom-btn" id="zoom-out" title="Zoom out (-)">
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M4 7.5h8v1H4z"/>
+                </svg>
+            </button>
+            <span class="zoom-label" id="zoom-label">100%</span>
+            <button class="zoom-btn" id="zoom-in" title="Zoom in (+)">
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M7.5 4v3.5H4v1h3.5V12h1V8.5H12v-1H8.5V4z"/>
+                </svg>
+            </button>
+            <button class="zoom-btn zoom-reset" id="zoom-reset" title="Reset zoom">
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2zm0 1a5 5 0 1 1 0 10A5 5 0 0 1 8 3zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm0 1a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+</header>
+
+<div class="timeline-outer" id="timeline-outer">
+    <div class="timeline-viewport" id="viewport">
+        <div class="timeline-canvas" id="canvas">
+
+            <!-- Photo bubbles live here -->
+            <div class="photos-area" id="photos-area"></div>
+
+            <!-- Month/week ruler -->
+            <div class="ruler" id="ruler"></div>
+
+            <!-- One lane per repo -->
+            <div class="lanes" id="lanes"></div>
+
+        </div>
+    </div>
+    <!-- Left/right fade masks -->
+    <div class="viewport-mask viewport-mask--left"></div>
+    <div class="viewport-mask viewport-mask--right"></div>
+</div>
+
+<!-- Floating commit tooltip -->
+<div class="commit-tooltip" id="tooltip" role="tooltip" aria-hidden="true"></div>
+
+<!-- Lightbox / full-screen carousel -->
+<div class="lightbox" id="lightbox" aria-modal="true" role="dialog" aria-label="Media viewer">
+    <div class="lb-backdrop" id="lb-backdrop"></div>
+
+    <button class="lb-close" id="lb-close" aria-label="Close (Esc)">
+        <svg viewBox="0 0 20 20" fill="currentColor">
+            <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"/>
+        </svg>
+    </button>
+
+    <button class="lb-nav lb-prev" id="lb-prev" aria-label="Previous (←)">
+        <svg viewBox="0 0 20 20" fill="currentColor">
+            <path d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"/>
+        </svg>
+    </button>
+    <button class="lb-nav lb-next" id="lb-next" aria-label="Next (→)">
+        <svg viewBox="0 0 20 20" fill="currentColor">
+            <path d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+        </svg>
+    </button>
+
+    <div class="lb-stage" id="lb-stage"></div>
+
+    <div class="lb-footer">
+        <div class="lb-note" id="lb-note" hidden></div>
+        <div class="lb-caption" id="lb-caption"></div>
+        <div class="lb-counter" id="lb-counter"></div>
+    </div>
+</div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

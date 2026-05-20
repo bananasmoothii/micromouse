@@ -1,0 +1,832 @@
+/* ===== Reset & base ===== */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ===== Design tokens ===== */
+:root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2128;
+    --border: #30363d;
+    --border-sub: #21262d;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --faint: #3d444d;
+
+    --header-h: 52px;
+    --photos-h: 260px;
+    --ruler-h: 40px;
+    --lane-h: 34px;
+    --pad-h: 72px; /* horizontal padding inside canvas */
+}
+
+/* ===== Header ===== */
+.header {
+    height: var(--header-h);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 0 18px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 400;
+}
+
+.header-brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-shrink: 0;
+}
+
+.header-logo {
+    width: 22px;
+    height: 22px;
+    color: #818cf8;
+    flex-shrink: 0;
+}
+
+.header-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+/* ===== Legend ===== */
+.legend {
+    display: flex;
+    gap: 18px;
+    flex: 1;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: default;
+    transition: color 0.15s;
+}
+
+.legend-item:hover {
+    color: var(--text);
+}
+
+.legend-swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 2px transparent;
+    transition: box-shadow 0.15s;
+}
+
+.legend-item:hover .legend-swatch {
+    box-shadow: 0 0 0 2px currentColor;
+}
+
+.legend-count {
+    font-size: 11px;
+    color: var(--faint);
+}
+
+/* ===== Zoom controls ===== */
+.header-actions {
+    flex-shrink: 0;
+}
+
+.zoom-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.zoom-btn {
+    width: 26px;
+    height: 26px;
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    color: var(--muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+}
+
+.zoom-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.zoom-btn:hover {
+    background: var(--border);
+    color: var(--text);
+}
+
+.zoom-label {
+    font-size: 11px;
+    color: var(--muted);
+    min-width: 34px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.zoom-reset svg {
+    width: 13px;
+    height: 13px;
+}
+
+/* ===== Outer wrapper (relative so masks can position inside) ===== */
+.timeline-outer {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+/* ===== Viewport (scrollable) ===== */
+.timeline-viewport {
+    width: 100%;
+    height: 100%;
+    overflow-x: scroll;
+    overflow-y: hidden;
+    cursor: grab;
+    user-select: none;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    align-items: flex-start;
+}
+
+.timeline-viewport.is-dragging {
+    cursor: grabbing;
+}
+
+.timeline-viewport::-webkit-scrollbar {
+    height: 8px;
+}
+
+.timeline-viewport::-webkit-scrollbar-track {
+    background: var(--surface);
+}
+
+.timeline-viewport::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+    border: 2px solid var(--surface);
+}
+
+.timeline-viewport::-webkit-scrollbar-thumb:hover {
+    background: #484f58;
+}
+
+/* ===== Left/right fade masks ===== */
+.viewport-mask {
+    position: absolute;
+    top: 0;
+    bottom: 8px; /* above scrollbar */
+    width: 60px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.viewport-mask--left {
+    left: 0;
+    background: linear-gradient(to right, var(--bg), transparent);
+}
+
+.viewport-mask--right {
+    right: 0;
+    background: linear-gradient(to left, var(--bg), transparent);
+}
+
+/* ===== Canvas (sized by JS) ===== */
+.timeline-canvas {
+    position: relative;
+    flex-shrink: 0; /* prevent flex container from shrinking the canvas */
+    height: calc(var(--photos-h) + var(--ruler-h) + 4 * var(--lane-h) + 24px);
+    /* Center the ruler+lanes section (not the empty photos-area) on the full screen */
+    margin-top: calc(50vh - var(--header-h) - var(--photos-h) - (var(--ruler-h) + 4 * var(--lane-h) + 24px) / 2);
+    /* width set by JS */
+}
+
+/* ===== Photos area ===== */
+.photos-area {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: var(--photos-h);
+    overflow: visible; /* let expanded bubbles overflow upward */
+    pointer-events: none; /* bubbles set their own pointer-events */
+}
+
+/* ===== Photo bubble ===== */
+.photo-bubble {
+    position: absolute;
+    bottom: 0;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 20;
+}
+
+.photo-bubble.is-hovered {
+    z-index: 200;
+}
+
+/* The inner wrapper scales on hover, anchored at its bottom center */
+.photo-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transform-origin: bottom center;
+    transform: scale(1);
+    transition: transform 0.42s cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 0.42s ease;
+    will-change: transform, filter;
+}
+
+.note-indicator {
+    transition: transform 0.42s cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 0.42s ease;
+}
+
+.photo-bubble.is-hovered .photo-inner {
+    transform: scale(2.5);
+    filter: drop-shadow(0 8px 28px rgba(0, 0, 0, 0.85));
+}
+
+.photo-bubble.has-note.is-hovered .photo-inner {
+    transform: scale(2.5);
+}
+
+.photo-bubble.has-note.is-hovered .note-indicator {
+    transform: scale(0.5) translateY(10px);
+}
+
+/* Card */
+.photo-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.photo-card img,
+.photo-card video {
+    display: block;
+    width: 76px;
+    height: 76px;
+    object-fit: cover;
+    pointer-events: none; /* suppress Edge's image/video hover toolbar */
+}
+
+/* Transparent shield that sits above the <video> thumbnail, preventing Edge
+   from detecting hover on the video element and showing its toolbar */
+.video-shield {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+}
+
+/* Note indicator — three-lines icon sitting above the thumbnail in the flex column */
+.note-indicator {
+    width: 16px;
+    height: 13px;
+    flex-shrink: 0;
+    margin-bottom: 5px;
+    color: var(--muted);
+    pointer-events: none;
+}
+
+.note-indicator svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Play icon overlay on video bubbles */
+.media-play-icon {
+    position: absolute;
+    inset: 0;
+    z-index: 2; /* above .video-shield */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.28);
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.media-play-icon svg {
+    width: 20px;
+    height: 20px;
+    color: #fff;
+    filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.6));
+}
+
+.photo-bubble.is-hovered .media-play-icon {
+    opacity: 0;
+}
+
+/* Caption overlay (revealed on hover via parent scaling) */
+.photo-caption {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 14px 5px 5px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+    color: #fff;
+    font-size: 11px;
+    font-weight: 500;
+    text-align: center;
+    letter-spacing: 0.02em;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+}
+
+/* Show caption as soon as hover starts (scale is already growing) */
+.photo-bubble.is-hovered .photo-caption {
+    opacity: 1;
+}
+
+/* Tail triangle */
+.photo-tail {
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 8px solid var(--border);
+    position: relative;
+    flex-shrink: 0;
+    margin-top: -1px;
+}
+
+.photo-tail::after {
+    content: '';
+    position: absolute;
+    top: -8px;
+    left: -5px;
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 7px solid var(--surface2);
+}
+
+/* Stem from tail to ruler */
+.photo-stem {
+    width: 1px;
+    height: 14px;
+    background: linear-gradient(to bottom, var(--border), transparent);
+    flex-shrink: 0;
+}
+
+/* ===== Ruler ===== */
+.ruler {
+    position: absolute;
+    top: var(--photos-h);
+    left: 0;
+    right: 0;
+    height: var(--ruler-h);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    overflow: visible;
+}
+
+/* Month divider + label */
+.ruler-month {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    padding-left: 9px;
+    border-left: 1px solid var(--border);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.ruler-month-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.8;
+}
+
+/* Week ticks */
+.ruler-week {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: var(--faint);
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+/* "Today" line (orange) */
+.ruler-today {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    background: #f97316;
+    border-radius: 1px;
+    pointer-events: none;
+    z-index: 6;
+}
+
+.ruler-today-label {
+    position: absolute;
+    top: 4px;
+    left: 5px;
+    font-size: 9px;
+    font-weight: 700;
+    color: #f97316;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+}
+
+/* ===== Commit lanes ===== */
+.lanes {
+    position: absolute;
+    top: calc(var(--photos-h) + var(--ruler-h));
+    left: 0;
+    right: 0;
+    padding: 4px 0 8px;
+}
+
+.lane {
+    position: relative;
+    height: var(--lane-h);
+    display: flex;
+    align-items: center;
+}
+
+/* Subtle lane separator */
+.lane + .lane::before {
+    content: '';
+    position: absolute;
+    left: var(--pad-h);
+    right: var(--pad-h);
+    top: 0;
+    height: 1px;
+    background: var(--border-sub);
+}
+
+/* Sticky label at left edge */
+.lane-label {
+    position: sticky;
+    left: 12px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    z-index: 50;
+    pointer-events: none;
+    padding: 2px 7px 2px 9px;
+    border-radius: 5px;
+    border-left: 2px solid currentColor;
+    background: color-mix(in srgb, currentColor 8%, var(--bg));
+    line-height: 18px;
+}
+
+/* Commit dot */
+.commit-dot {
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    transform: translateX(-50%);
+    cursor: pointer;
+    transition: transform 0.12s ease;
+    border: 1.5px solid rgba(0, 0, 0, 0.35);
+    z-index: 30;
+}
+
+.commit-dot:hover {
+    transform: translateX(-50%) scale(2.2);
+    z-index: 50;
+}
+
+/* Highlight "milestone" commits (all-caps messages) with a glow */
+.commit-dot.is-milestone {
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 30%, transparent);
+    width: 9px;
+    height: 9px;
+    border-width: 2px;
+}
+
+/* ===== Commit tooltip ===== */
+.commit-tooltip {
+    position: fixed;
+    z-index: 900;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 9px 13px;
+    font-size: 12px;
+    color: var(--text);
+    pointer-events: none;
+    display: none;
+    max-width: 270px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+    line-height: 1.55;
+    backdrop-filter: blur(8px);
+}
+
+.tt-repo {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.tt-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+
+.tt-date {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.tt-hash {
+    font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
+    font-size: 10px;
+    color: var(--faint);
+}
+
+.tt-message {
+    font-size: 12.5px;
+    color: var(--text);
+    word-break: break-word;
+}
+
+.tt-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.tt-badge--unmerged {
+    color: #5a6270;
+    background: rgba(90, 98, 112, 0.15);
+    border: 1px solid rgba(90, 98, 112, 0.3);
+}
+
+.tt-badge--other {
+    color: #7ea8c4;
+    background: rgba(126, 168, 196, 0.12);
+    border: 1px solid rgba(126, 168, 196, 0.28);
+}
+
+.tt-author {
+    font-size: 11px;
+    color: #7ea8c4;
+    margin-bottom: 3px;
+}
+
+/* ===== Scrollbar (Firefox) ===== */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--surface);
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 600px) {
+    .header-title {
+        font-size: 13px;
+    }
+
+    .legend {
+        gap: 12px;
+    }
+
+    .legend-count {
+        display: none;
+    }
+}
+
+/* ===== Lightbox / carousel ===== */
+.lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease;
+}
+
+.lightbox.is-open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Backdrop */
+.lb-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.93);
+    cursor: zoom-out;
+}
+
+/* Close button */
+.lb-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 4;
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 50%;
+    color: #e6edf3;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, transform 0.15s;
+}
+
+.lb-close:hover {
+    background: rgba(255, 255, 255, 0.18);
+    transform: scale(1.1);
+}
+
+.lb-close svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* Prev / Next buttons */
+.lb-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 4;
+    width: 52px;
+    height: 52px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 50%;
+    color: #e6edf3;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, transform 0.15s, opacity 0.15s;
+    backdrop-filter: blur(6px);
+}
+
+.lb-nav svg {
+    width: 22px;
+    height: 22px;
+}
+
+.lb-nav:hover {
+    background: rgba(255, 255, 255, 0.18);
+    transform: translateY(-50%) scale(1.08);
+}
+
+.lb-nav:disabled {
+    opacity: 0.2;
+    pointer-events: none;
+}
+
+.lb-prev {
+    left: 20px;
+}
+
+.lb-next {
+    right: 20px;
+}
+
+/* Media stage */
+.lb-stage {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-width: calc(100vw - 160px);
+    max-height: calc(100vh - 110px);
+}
+
+/* The actual image or video */
+.lb-media {
+    display: block;
+    max-width: 100%;
+    max-height: calc(100vh - 110px);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 10px;
+    box-shadow: 0 20px 80px rgba(0, 0, 0, 0.7);
+    animation: lb-fadein 0.2s ease;
+    pointer-events: auto; /* re-enable for lightbox video controls */
+}
+
+@keyframes lb-fadein {
+    from {
+        opacity: 0;
+        transform: scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Footer: caption + counter */
+.lb-footer {
+    position: absolute;
+    bottom: 18px;
+    left: 0;
+    right: 0;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    pointer-events: none;
+}
+
+.lb-caption {
+    font-size: 13px;
+    font-weight: 500;
+    color: #e6edf3;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+
+.lb-counter {
+    font-size: 11px;
+    color: #7d8590;
+    font-variant-numeric: tabular-nums;
+}
+
+.lb-note {
+    font-size: 13px;
+    color: #e6edf3;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 7px 16px;
+    max-width: 480px;
+    text-align: center;
+    line-height: 1.55;
+    backdrop-filter: blur(6px);
+    margin-bottom: 6px;
+}
