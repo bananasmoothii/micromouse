@@ -8,6 +8,7 @@ use crate::dimensions::{LAB_CELL, LAB_CELL_HALF, LATERAL_CLEARANCE, ROBOT_WIDTH}
 use crate::flash_log;
 use crate::positioning::CURRENT_POS;
 use crate::positioning::odometry::{DISTANCE_PER_TICK, TICKS_PER_REVOLUTION};
+use crate::trajectory::straight_line::StraightLineGoal::Distance;
 use crate::trajectory::{TrajectorySegment, UPDATE_INTERVAL_MS};
 use crate::utils::{CellMutexUtils, MathUtils};
 use alloc::format;
@@ -69,12 +70,17 @@ const BRAKE_DISTANCE: f32 = 0.00;
 
 static HEADING_INTEGRAL: AtomicU32 = AtomicU32::new(0f32.to_bits());
 
+pub enum StraightLineGoal {
+    Distance(f32),
+    DistanceToFrontWall(f32),
+}
+
 /// Accelerates to max speed (if possible), maintains it, then decelerates.
 /// Acceleration is done purely through PI control, deceleration is commanded gradually (still
 /// through PI control to satisfy DECELERATION_SPEED.
 /// Implementation is distance-based, not time-based
 pub struct StraightLine {
-    pub distance: f32,
+    pub goal: StraightLineGoal,
     pub out_speed: f32,
 }
 
@@ -90,26 +96,6 @@ impl TrajectorySegment for StraightLine {
             motor_right,
         };
 
-        let start_pos = CURRENT_POS.get();
-        let initial_theta = start_pos.theta;
-        let left_ticks_start = LEFT_TICKS_CUMULATIVE.load(Relaxed);
-        let right_ticks_start = RIGHT_TICKS_CUMULATIVE.load(Relaxed);
-        let target_ticks = (self.distance / DISTANCE_PER_TICK).round() as i32;
-
-        // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
-        let decel_distance_full_speed =
-            (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * DECELERATION);
-        let (max_reachable_speed, decel_distance) = if decel_distance_full_speed <= self.distance {
-            (MAX_SPEED_M_S, decel_distance_full_speed)
-        } else {
-            // v_max² = 2aΔx + v_final²    (with Δx = self.distance)
-            (
-                (2.0 * DECELERATION * self.distance + self.out_speed.square()).sqrt(),
-                self.distance,
-            )
-        };
-        let decel_start_distance = self.distance - decel_distance;
-
         let mut left_rcv = VL53L1X_45D_LEFT_WATCH
             .receiver()
             .expect("ToF Watch receivers exhausted (N=4)");
@@ -119,6 +105,47 @@ impl TrajectorySegment for StraightLine {
         let mut middle_rcv = VL53L1X_MIDDLE_WATCH
             .receiver()
             .expect("ToF Watch receivers exhausted (N=4)");
+
+        let start_pos = CURRENT_POS.get();
+        let initial_theta = start_pos.theta;
+        let left_ticks_start = LEFT_TICKS_CUMULATIVE.load(Relaxed);
+        let right_ticks_start = RIGHT_TICKS_CUMULATIVE.load(Relaxed);
+        let mut target_ticks = if let Distance(d) = self.goal {
+            (d / DISTANCE_PER_TICK).round() as i32
+        } else {
+            i32::MAX
+        };
+
+        // For DistanceToFrontWall: seed total_distance from the current front sensor reading if
+        // available so the accel ramp starts correctly; fall back to INFINITY (robot accelerates
+        // freely until the first in-loop update).
+        let mut total_distance: f32 = match &self.goal {
+            Distance(d) => *d,
+            StraightLineGoal::DistanceToFrontWall(stop_offset) => middle_rcv
+                .try_get()
+                .filter(|it| it.is_newer_than(SIDE_WALL_STALE_MEASUREMENT))
+                .and_then(|snap| {
+                    let r = snap.data.0.range_milli_meter as f32 / 1000.0 - *stop_offset;
+                    if r > 0.0 { Some(r) } else { None }
+                })
+                .unwrap_or(f32::INFINITY),
+        };
+        let mut last_front_at: Option<Instant> = None;
+
+        // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
+        let decel_distance_full_speed =
+            (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * DECELERATION);
+        let (mut max_reachable_speed, mut decel_distance) =
+            if decel_distance_full_speed <= total_distance {
+                (MAX_SPEED_M_S, decel_distance_full_speed)
+            } else {
+                // v_max² = 2aΔx + v_final²    (with Δx = total_distance)
+                (
+                    (2.0 * DECELERATION * total_distance + self.out_speed.square()).sqrt(),
+                    total_distance,
+                )
+            };
+        let mut decel_start_distance = total_distance - decel_distance;
 
         let mut speed_integral = 0.0f32;
         let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
@@ -139,6 +166,34 @@ impl TrajectorySegment for StraightLine {
             // Tick-based distance: more accurate than EKF position for stop condition
             let avg_ticks = (left_ticks + right_ticks) / 2;
             let distance = avg_ticks as f32 * DISTANCE_PER_TICK;
+
+            // DistanceToFrontWall: every new front-sensor reading updates the target.
+            // Using the same ramp formula as the pre-loop init, applied to the new
+            // total distance so accel and decel ramps stay consistent.
+            if let StraightLineGoal::DistanceToFrontWall(stop_offset) = &self.goal {
+                if let Some(snap) = middle_rcv
+                    .try_get()
+                    .filter(|it| it.is_newer_than(SIDE_WALL_STALE_MEASUREMENT))
+                    .filter(|snap| last_front_at != Some(snap.at))
+                {
+                    last_front_at = Some(snap.at);
+                    let d_front = snap.data.0.range_milli_meter as f32 / 1000.0;
+                    let remaining = (d_front - *stop_offset).max(0.0);
+                    total_distance = distance + remaining;
+                    target_ticks = (total_distance / DISTANCE_PER_TICK).round() as i32;
+                    let ddf = (MAX_SPEED_M_S.square() - self.out_speed.square())
+                        / (2.0 * DECELERATION);
+                    (max_reachable_speed, decel_distance) = if ddf <= total_distance {
+                        (MAX_SPEED_M_S, ddf)
+                    } else {
+                        let v = (2.0 * DECELERATION * total_distance
+                            + self.out_speed.square())
+                            .sqrt();
+                        (v, total_distance)
+                    };
+                    decel_start_distance = total_distance - decel_distance;
+                }
+            }
 
             if avg_ticks >= target_ticks {
                 flash_log!(
@@ -183,8 +238,8 @@ impl TrajectorySegment for StraightLine {
             let p = KP * speed_error;
             let i = KI * speed_integral;
 
-            let in_brake = self.distance - distance <= BRAKE_DISTANCE;
-            let sign = self.distance.signum();
+            let in_brake = total_distance - distance <= BRAKE_DISTANCE;
+            let sign = total_distance.signum();
             let pi_out = p + i;
             let min_speed = if in_decel {
                 DECEL_MIN_SPEED
@@ -229,8 +284,12 @@ impl TrajectorySegment for StraightLine {
                 let wall_correction = if h_l > 0.0 && h_r > 0.0 {
                     h_l - h_r
                 } else {
-                    let sl = left_dist.map(|d| Self::get_single_wall_heading_error(d)).unwrap_or(0.0);
-                    let sr = right_dist.map(|d| Self::get_single_wall_heading_error(d)).unwrap_or(0.0);
+                    let sl = left_dist
+                        .map(|d| Self::get_single_wall_heading_error(d))
+                        .unwrap_or(0.0);
+                    let sr = right_dist
+                        .map(|d| Self::get_single_wall_heading_error(d))
+                        .unwrap_or(0.0);
                     sl - sr
                 };
                 heading_error += wall_correction.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
@@ -252,10 +311,14 @@ impl TrajectorySegment for StraightLine {
             let steering = (steer_p + steer_i).clamp(-MAX_STEERING, MAX_STEERING);
 
             let active_steering = if in_brake { 0.0 } else { steering };
+            let middle_dist = middle_rcv
+                .try_get()
+                .filter(|it| it.is_newer_than(SIDE_WALL_STALE_MEASUREMENT))
+                .map(|snap| snap.data.0.range_milli_meter as f32 / 1000.0);
             flash_log!(
-                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, L: {} M: {} R: {}, L_rate: {} R_rate: {}, hdg: {}deg, theta: {}deg",
+                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer_p: {}, L: {} M: {} R: {}, L_rate: {} R_rate: {}, hdg: {}deg, theta: {}deg",
                 format!("{:.2}", distance).as_str(),
-                format!("{:.2}", self.distance).as_str(),
+                format!("{:.2}", total_distance).as_str(),
                 format!("{:.2}", target_speed).as_str(),
                 if in_decel { " (decel)" } else { "" },
                 format!("{:.2}", current_pos.v_forward).as_str(),
@@ -263,11 +326,9 @@ impl TrajectorySegment for StraightLine {
                 format!("{:.2}", commanded_speed).as_str(),
                 format!("{:.4}", p).as_str(),
                 format!("{:.4}", i).as_str(),
-                format!("{:.4}", active_steering).as_str(),
                 format!("{:.4}", steer_p).as_str(),
-                format!("{:.4}", steer_i).as_str(),
                 format!("{:.3}", left_dist.unwrap_or(f32::NAN)).as_str(),
-                0,
+                format!("{:.3}", middle_dist.unwrap_or(f32::NAN)).as_str(),
                 format!("{:.3}", right_dist.unwrap_or(f32::NAN)).as_str(),
                 format!("{:.3}", left_rate_buf.approach_rate()).as_str(),
                 format!("{:.3}", right_rate_buf.approach_rate()).as_str(),
@@ -333,7 +394,8 @@ impl WallRateBuffer {
         match (oldest, newest) {
             (Some((d_old, t_old)), Some((d_new, t_new))) if t_new > t_old => {
                 // Treat the rate as zero if no fresh sample arrived recently.
-                if Instant::now().checked_duration_since(t_new)
+                if Instant::now()
+                    .checked_duration_since(t_new)
                     .map_or(true, |age| age >= SIDE_WALL_STALE_MEASUREMENT)
                 {
                     return 0.0;

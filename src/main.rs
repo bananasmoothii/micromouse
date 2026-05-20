@@ -19,7 +19,7 @@ use crate::devices::motors::{Motor, WheelSide};
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::positioning::positioning_task;
 use crate::trajectory::TrajectorySegment;
-use crate::trajectory::straight_line::StraightLine;
+use crate::trajectory::straight_line::{StraightLine, StraightLineGoal};
 use crate::utils::{DurationUtils, HertzUtils};
 use alloc::boxed::Box;
 use alloc::vec;
@@ -250,7 +250,7 @@ async fn motor_tests(
 
     let segments: Vec<Box<dyn TrajectorySegment>> = vec![
         Box::new(StraightLine {
-            distance: 1.0,
+            goal: StraightLineGoal::DistanceToFrontWall(0.2),
             out_speed: 0.0,
         }),
         // Box::new(InPlaceTurn::from_degrees(-90.0)),
