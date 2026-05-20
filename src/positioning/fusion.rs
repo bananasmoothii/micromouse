@@ -92,7 +92,8 @@ impl SensorFusion {
     }
 
     pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult) -> PositionState {
-        let omega = if mpu.dt > 0.0 { mpu.d_theta.abs() / mpu.dt } else { 0.0 };
+        let omega_signed = if mpu.dt > 0.0 { mpu.d_theta / mpu.dt } else { 0.0 };
+        let omega = omega_signed.abs();
         let r_theta_odom = R_THETA_ODOM_STRAIGHT * (1.0 + SKID_K * omega.square());
         // --- Heading Kalman filter ---
 
@@ -161,6 +162,7 @@ impl SensorFusion {
         self.state.y += k_xy_odom * (self.odom_global_y - self.state.y);
         self.p_xy_odom *= 1.0 - k_xy_odom;
 
+        self.state.omega = omega_signed;
         self.state
     }
 }

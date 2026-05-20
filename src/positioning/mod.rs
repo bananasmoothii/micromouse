@@ -23,6 +23,7 @@ pub static CURRENT_POS: Mutex<CriticalSectionRawMutex, Cell<PositionState>> = Mu
     y: 0.0,
     theta: 0.0,
     v_forward: 0.0,
+    omega: 0.0,
 }));
 
 #[embassy_executor::task]

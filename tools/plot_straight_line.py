@@ -36,6 +36,8 @@ FIELDS: list[tuple[str, str, type]] = [
     ("m_m",        r"\bM: (-?[\d.]+|NaN)",     float),
     ("r_m",        r"\bR: (-?[\d.]+|NaN)",     float),
     ("drift_mm",   r"drift_mm: (-?[\d.]+)",    float),
+    ("l_rate",     r"L_rate: (-?[\d.]+)",      float),
+    ("r_rate",     r"R_rate: (-?[\d.]+)",      float),
     ("hdg",        r"hdg: (-?[\d.]+)deg",      float),
     ("theta",      r"theta: (-?[\d.]+)deg",    float),
 ]
@@ -129,6 +131,8 @@ l_mm       = col("l_m", transform=m_to_mm)
 m_mm       = col("m_m", transform=m_to_mm)
 r_mm       = col("r_m", transform=m_to_mm)
 drift_mm   = col("drift_mm")
+l_rate     = col("l_rate")
+r_rate     = col("r_rate")
 theta      = col("theta")
 
 total = rows[0]["total"]
@@ -187,8 +191,19 @@ ax3.axhline(90, color="tab:blue", linewidth=2.0, linestyle=":", alpha=0.6, label
 ax3.set_ylim(0, 300)
 ax3.set_ylabel("Distance (mm) / drift (mm)")
 ax3.set_xlabel("Distance (m)")
-ax3.legend(loc="upper right", fontsize=8)
+ax3.legend(loc="upper left", fontsize=8)
 ax3.grid(True, alpha=0.4)
+
+# Approach rates on a secondary y-axis (m/s, positive = closing in)
+if l_rate is not None or r_rate is not None:
+    ax3r = ax3.twinx()
+    if l_rate is not None:
+        ax3r.plot(dist, l_rate, label=f"L rate (m/s)", color="tab:blue",   linestyle="--", linewidth=1.0, alpha=0.7)
+    if r_rate is not None:
+        ax3r.plot(dist, r_rate, label=f"R rate (m/s)", color="tab:orange", linestyle="--", linewidth=1.0, alpha=0.7)
+    ax3r.axhline(0, color="black", linewidth=0.4, linestyle=":")
+    ax3r.set_ylabel("Approach rate (m/s, + = closing)")
+    ax3r.legend(loc="upper right", fontsize=8)
 
 plt.tight_layout()
 plt.show()

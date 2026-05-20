@@ -40,14 +40,18 @@ const MAX_INTEGRAL_CONTRIB: f32 = MAX_SPEED_M_S;
 /// Straight-line heading PI: keeps the robot on its initial bearing.
 /// Steering is a dimensionless wheel-speed asymmetry (see `set_speed_steered`); negated because
 /// CW rotation increases theta on this hardware.
-const KP_STEERING: f32 = 0.8;
-const KI_STEERING: f32 = 2.0;
+const KP_STEERING: f32 = 0.6;
+const KI_STEERING: f32 = 0.0;
 const MAX_STEERING_INTEGRAL: f32 = 0.15;
-const MAX_STEERING: f32 = 0.20;
+const MAX_STEERING: f32 = 0.30;
 
 /// per tick
-const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 2.0;
-const MAX_WALL_STEERING: f32 = 1.4;
+const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 0.70;
+const MAX_WALL_STEERING: f32 = 0.4;
+/// Approach-rate gain for wall avoidance (rad per m/s of closing speed).
+const KD_WALL: f32 = 0.2;
+/// Angular-rate damping gain: opposes rotation to prevent overshoot and spinning.
+const KD_HEADING: f32 = 0.05;
 
 /// Minimum commanded speed during deceleration — lower than MIN_USABLE_SPEED so friction dominates.
 /// Requires the MIN_USABLE_PWM snap in motors.rs to be removed.
@@ -119,6 +123,8 @@ impl TrajectorySegment for StraightLine {
         let mut speed_integral = 0.0f32;
         let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
         let mut in_decel = false;
+        let mut left_rate_buf = WallRateBuffer::new();
+        let mut right_rate_buf = WallRateBuffer::new();
 
         // Fixed-cadence control loop: wake on absolute deadlines so iteration period stays at
         // UPDATE_INTERVAL_MS regardless of work time inside the loop. If work overruns the
@@ -191,44 +197,44 @@ impl TrajectorySegment for StraightLine {
                 pi_out.clamp(sign * min_speed, sign * 1.5 * MAX_SPEED_M_S)
             };
 
-
             // Heading error: how much the robot has rotated from its initial direction.
             // Normalized to ±π so wrap-around near ±180° doesn't produce spurious corrections.
             let mut heading_error = current_pos.theta - initial_theta;
-            let left_dist = Self::get_wall_dist(&mut left_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
-            let right_dist = Self::get_wall_dist(&mut right_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
-            // change heading_error if necessary
+            let left_ts = Self::get_wall_dist(&mut left_rcv);
+            let right_ts = Self::get_wall_dist(&mut right_rcv);
+
+            if let Some((d, at)) = left_ts {
+                left_rate_buf.push_if_new(d, at);
+            }
+            if let Some((d, at)) = right_ts {
+                right_rate_buf.push_if_new(d, at);
+            }
+            let left_dist = left_ts.map(|(d, _)| d);
+            let right_dist = right_ts.map(|(d, _)| d);
+
+            // Blend wall-proximity correction into heading_error additively so that accumulated
+            // theta drift is never discarded. The clamp bounds the wall term alone; the combined
+            // total is then bounded by MAX_STEERING at the steer output.
             if !in_decel || target_speed > DECEL_MIN_SPEED + 0.2 {
-                match (left_dist, right_dist) {
+                let wall_correction = match (left_dist, right_dist) {
                     (Some(d), None) => {
-                        if let Some(h) = Self::get_heading_error(d) {
-                            heading_error = h;
-                            heading_error = heading_error.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
-                        }
+                        Self::get_heading_error(d).unwrap_or(0.0)
                     }
                     (None, Some(d)) => {
-                        if let Some(h) = Self::get_heading_error(d) {
-                            heading_error = -h; // invert (heading error is opposed to where we want to go)
-                            heading_error = heading_error.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
-                        }
+                        -Self::get_heading_error(d).unwrap_or(0.0)
                     }
                     (Some(ld), Some(rd)) => {
-                        // add both
-                        let left = Self::get_heading_error(ld);
-                        if let Some(h) = left {
-                            heading_error = h;
-                        }
-                        let right = Self::get_heading_error(rd);
-                        if let Some(h) = right {
-                            heading_error -= h;
-                        }
-                        if left.is_some() || right.is_some() {
-                            heading_error = heading_error.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
-                        }
+                        let h_l = Self::get_heading_error(ld).unwrap_or(0.0);
+                        let h_r = Self::get_heading_error(rd).unwrap_or(0.0);
+                        h_l - h_r
                     }
-                    (None, None) => {}
-                }
+                    (None, None) => 0.0,
+                };
+                heading_error += wall_correction.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
             }
+            // Approach-rate correction: left closing → steer right → error left (+), right closing → steer left → error right (−).
+            heading_error +=
+                KD_WALL * (left_rate_buf.approach_rate() - right_rate_buf.approach_rate());
             if heading_error > PI {
                 heading_error -= 2.0 * PI;
             }
@@ -238,14 +244,13 @@ impl TrajectorySegment for StraightLine {
             heading_integral = (heading_integral
                 + heading_error * (UPDATE_INTERVAL_MS as f32 / 1000.0))
                 .clamp(-MAX_STEERING_INTEGRAL, MAX_STEERING_INTEGRAL);
-            let steer_p = -(KP_STEERING * heading_error);
+            let steer_p = -(KP_STEERING * heading_error) - KD_HEADING * current_pos.omega;
             let steer_i = -(KI_STEERING * heading_integral);
             let steering = (steer_p + steer_i).clamp(-MAX_STEERING, MAX_STEERING);
 
-
             let active_steering = if in_brake { 0.0 } else { steering };
             flash_log!(
-                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, L: {} M: {} R: {}, hdg: {}deg, theta: {}deg",
+                "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, L: {} M: {} R: {}, L_rate: {} R_rate: {}, hdg: {}deg, theta: {}deg",
                 format!("{:.2}", distance).as_str(),
                 format!("{:.2}", self.distance).as_str(),
                 format!("{:.2}", target_speed).as_str(),
@@ -261,6 +266,8 @@ impl TrajectorySegment for StraightLine {
                 format!("{:.3}", left_dist.unwrap_or(f32::NAN)).as_str(),
                 0,
                 format!("{:.3}", right_dist.unwrap_or(f32::NAN)).as_str(),
+                format!("{:.3}", left_rate_buf.approach_rate()).as_str(),
+                format!("{:.3}", right_rate_buf.approach_rate()).as_str(),
                 format!("{:.1}", heading_error.to_degrees()).as_str(),
                 format!("{:.1}", current_pos.theta.to_degrees()).as_str(),
             );
@@ -274,25 +281,100 @@ impl TrajectorySegment for StraightLine {
     }
 }
 
+const WALL_RATE_BUFFER_SIZE: usize = 3;
+
+/// Ring buffer of the last N wall-distance samples (one entry per new sensor reading).
+/// Approach rate is computed as (oldest − newest) / elapsed, so positive = wall closing in.
+struct WallRateBuffer {
+    slots: [Option<(f32, Instant)>; WALL_RATE_BUFFER_SIZE],
+    head: usize,
+    last_at: Option<Instant>,
+}
+
+impl WallRateBuffer {
+    const fn new() -> Self {
+        Self {
+            slots: [None; WALL_RATE_BUFFER_SIZE],
+            head: 0,
+            last_at: None,
+        }
+    }
+
+    /// Only records the sample if its timestamp is newer than the last one stored,
+    /// so consecutive loop iterations with the same sensor reading don't inflate the buffer.
+    fn push_if_new(&mut self, dist: f32, at: Instant) {
+        if self.last_at == Some(at) {
+            return;
+        }
+        self.last_at = Some(at);
+        self.slots[self.head] = Some((dist, at));
+        self.head = (self.head + 1) % WALL_RATE_BUFFER_SIZE;
+    }
+
+    /// Returns approach rate in m/s (positive = getting closer).
+    /// Uses the oldest and newest valid entries in the buffer.
+    /// Returns 0.0 if fewer than 2 samples are available or the newest is stale.
+    fn approach_rate(&self) -> f32 {
+        let mut oldest: Option<(f32, Instant)> = None;
+        let mut newest: Option<(f32, Instant)> = None;
+        for slot in &self.slots {
+            if let Some((d, t)) = *slot {
+                if oldest.map_or(true, |(_, ot)| t < ot) {
+                    oldest = Some((d, t));
+                }
+                if newest.map_or(true, |(_, nt)| t > nt) {
+                    newest = Some((d, t));
+                }
+            }
+        }
+        match (oldest, newest) {
+            (Some((d_old, t_old)), Some((d_new, t_new))) if t_new > t_old => {
+                // Treat the rate as zero if no fresh sample arrived recently.
+                if Instant::now().checked_duration_since(t_new)
+                    .map_or(true, |age| age >= SIDE_WALL_STALE_MEASUREMENT)
+                {
+                    return 0.0;
+                }
+                let elapsed_s = t_new
+                    .checked_duration_since(t_old)
+                    .map(|dur| dur.as_micros() as f32 / 1_000_000.0)
+                    .unwrap_or(0.0);
+                if elapsed_s > 0.001 {
+                    (d_old - d_new) / elapsed_s
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
+        }
+    }
+}
+
 const SIDE_WALL_STALE_MEASUREMENT: Duration = Duration::from_millis(150);
 const FOLLOWED_WALL_MAX_DIST: f32 = LAB_CELL - ROBOT_WIDTH;
 
 impl StraightLine {
-    /// Gets the distance in meters to the wall if data is fresh enough.
-    /// Distance is returned straight, not diagonal.
-    fn get_wall_dist(rcv: &mut DistReceiver) -> Option<f32> {
+    /// Gets the distance in meters to the wall plus its sample timestamp, if data is fresh enough.
+    /// Distance is returned straight (lateral component only, not diagonal).
+    fn get_wall_dist(rcv: &mut DistReceiver) -> Option<(f32, Instant)> {
         rcv.try_get()
             .filter(|it| it.is_newer_than(SIDE_WALL_STALE_MEASUREMENT))
-            .map(|snap| snap.data.0.range_milli_meter as f32 / 1000.0 / SQRT_2)
+            .map(|snap| {
+                (
+                    snap.data.0.range_milli_meter as f32 / 1000.0 / SQRT_2,
+                    snap.at,
+                )
+            })
     }
 
     fn get_heading_error(distance_middle_to_wall: f32) -> Option<f32> {
         let remaining = (distance_middle_to_wall - ROBOT_WIDTH / 2.0).max(0.0);
-        const PREFERRED_CLEARANCE: f32 = LATERAL_CLEARANCE + 0.015;
+        const PREFERRED_CLEARANCE: f32 = LATERAL_CLEARANCE * 2.5;
         if remaining < PREFERRED_CLEARANCE {
-            Some(SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
-                * (PREFERRED_CLEARANCE - remaining)
-                / PREFERRED_CLEARANCE)
+            Some(
+                SINGLE_WALL_STEERING_ANGLE_MULTIPLIER * (PREFERRED_CLEARANCE - remaining)
+                    / PREFERRED_CLEARANCE,
+            )
         } else {
             None
         }

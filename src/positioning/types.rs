@@ -9,6 +9,7 @@ pub struct PositionState {
     pub y: f32,     // meters
     pub theta: f32, // radians, counter-clockwise
     pub v_forward: f32, // local forward velocity (m/s), average of both wheels
+    pub omega: f32, // angular rate (rad/s), positive = counter-clockwise
 }
 
 impl PositionState {
@@ -23,11 +24,12 @@ impl Format for PositionState {
     fn format(&self, fmt: defmt::Formatter) {
         defmt::write!(
             fmt,
-            "x: {} y: {} theta: {}° v: {}",
+            "x: {} y: {} theta: {}° v: {} omega: {}rad/s",
             format!("{:.2}", self.x).as_str(),
             format!("{:.2}", self.y).as_str(),
             format!("{:.1}", self.theta.to_degrees()).as_str(),
-            format!("{:.2}", self.v_forward).as_str()
+            format!("{:.2}", self.v_forward).as_str(),
+            format!("{:.2}", self.omega).as_str()
         );
     }
 }
@@ -36,11 +38,12 @@ impl Display for PositionState {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "x: {} y: {} theta: {}° v: {}",
+            "x: {} y: {} theta: {}° v: {} omega: {}rad/s",
             format!("{:.2}", self.x).as_str(),
             format!("{:.2}", self.y).as_str(),
             format!("{:.1}", self.theta.to_degrees()).as_str(),
-            format!("{:.2}", self.v_forward).as_str()
+            format!("{:.2}", self.v_forward).as_str(),
+            format!("{:.2}", self.omega).as_str()
         )
     }
 }
