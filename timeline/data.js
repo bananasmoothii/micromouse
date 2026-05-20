@@ -7,11 +7,19 @@ const TIMELINE_DATA = {
       "color": "#818cf8",
       "commits": [
         {
+          "hash": "cdf64c05",
+          "date": "2026-05-20T20:06:36",
+          "author": "Bananasmoothii",
+          "message": "new data",
+          "merged": true,
+          "mine": true
+        },
+        {
           "hash": "00a497e0",
           "date": "2026-05-20T20:04:47",
           "author": "Bananasmoothii",
           "message": "Timeline website !",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -19,7 +27,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-20T20:00:51",
           "author": "Bananasmoothii",
           "message": "Alright, can't do more without Fablab",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -27,7 +35,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-20T19:06:27",
           "author": "Bananasmoothii",
           "message": "Almost perfect straight line in corridor !",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -35,7 +43,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-20T14:20:25",
           "author": "Bananasmoothii",
           "message": "yeah wall following still",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -43,7 +51,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-20T12:59:31",
           "author": "Bananasmoothii",
           "message": "Fix I2C sensor polling with round-robin",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -51,7 +59,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-19T21:10:22",
           "author": "Bananasmoothii",
           "message": "WALL FOLLOWING WORKS",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -59,7 +67,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-19T20:35:21",
           "author": "Bananasmoothii",
           "message": "Improve wall steering",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -67,7 +75,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-18T19:12:09",
           "author": "Bananasmoothii",
           "message": "Fix wall steering",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -75,7 +83,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-18T15:22:45",
           "author": "Bananasmoothii",
           "message": "rewrite start",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
@@ -83,7 +91,7 @@ const TIMELINE_DATA = {
           "date": "2026-05-18T13:48:47",
           "author": "Bananasmoothii",
           "message": "restart wall folowing from scratch",
-          "merged": false,
+          "merged": true,
           "mine": true
         },
         {
