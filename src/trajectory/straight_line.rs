@@ -216,19 +216,22 @@ impl TrajectorySegment for StraightLine {
             // theta drift is never discarded. The clamp bounds the wall term alone; the combined
             // total is then bounded by MAX_STEERING at the steer output.
             if !in_decel || target_speed > DECEL_MIN_SPEED + 0.2 {
-                let wall_correction = match (left_dist, right_dist) {
-                    (Some(d), None) => {
-                        Self::get_heading_error(d).unwrap_or(0.0)
-                    }
-                    (None, Some(d)) => {
-                        -Self::get_heading_error(d).unwrap_or(0.0)
-                    }
-                    (Some(ld), Some(rd)) => {
-                        let h_l = Self::get_heading_error(ld).unwrap_or(0.0);
-                        let h_r = Self::get_heading_error(rd).unwrap_or(0.0);
-                        h_l - h_r
-                    }
-                    (None, None) => 0.0,
+                let h_l = left_dist
+                    .and_then(|d| Self::get_heading_error(d))
+                    .unwrap_or(0.0);
+                let h_r = right_dist
+                    .and_then(|d| Self::get_heading_error(d))
+                    .unwrap_or(0.0);
+                // Both walls contribute → full centering force (PREFERRED_CLEARANCE target).
+                // Only one wall → conservative avoidance: only correct when actually closer
+                // than the natural corridor center (LATERAL_CLEARANCE target). This prevents
+                // overshooting into open space when the opposing wall is not yet visible.
+                let wall_correction = if h_l > 0.0 && h_r > 0.0 {
+                    h_l - h_r
+                } else {
+                    let sl = left_dist.map(|d| Self::get_single_wall_heading_error(d)).unwrap_or(0.0);
+                    let sr = right_dist.map(|d| Self::get_single_wall_heading_error(d)).unwrap_or(0.0);
+                    sl - sr
                 };
                 heading_error += wall_correction.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
             }
@@ -377,6 +380,20 @@ impl StraightLine {
             )
         } else {
             None
+        }
+    }
+
+    /// Single-wall variant: uses LATERAL_CLEARANCE as the target instead of PREFERRED_CLEARANCE.
+    /// Fires only when the robot is actually closer than the natural corridor center, so a robot
+    /// at the center of the corridor (remaining ≈ LATERAL_CLEARANCE) gets zero correction.
+    fn get_single_wall_heading_error(distance_middle_to_wall: f32) -> f32 {
+        let remaining = (distance_middle_to_wall - ROBOT_WIDTH / 2.0).max(0.0);
+        const PREFERRED_CLEARANCE: f32 = LATERAL_CLEARANCE * 1.1;
+        if remaining < PREFERRED_CLEARANCE {
+            SINGLE_WALL_STEERING_ANGLE_MULTIPLIER * (PREFERRED_CLEARANCE - remaining)
+                / PREFERRED_CLEARANCE
+        } else {
+            0.0
         }
     }
 }
