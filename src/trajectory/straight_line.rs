@@ -46,7 +46,8 @@ const MAX_STEERING_INTEGRAL: f32 = 0.15;
 const MAX_STEERING: f32 = 0.20;
 
 /// per tick
-const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 0.45;
+const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 2.0;
+const MAX_WALL_STEERING: f32 = 1.4;
 
 /// Minimum commanded speed during deceleration — lower than MIN_USABLE_SPEED so friction dominates.
 /// Requires the MIN_USABLE_PWM snap in motors.rs to be removed.
@@ -197,25 +198,32 @@ impl TrajectorySegment for StraightLine {
             let left_dist = Self::get_wall_dist(&mut left_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
             let right_dist = Self::get_wall_dist(&mut right_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
             // change heading_error if necessary
-            if in_decel && target_speed <= DECEL_MIN_SPEED + 0.2 {
+            if !in_decel || target_speed > DECEL_MIN_SPEED + 0.2 {
                 match (left_dist, right_dist) {
                     (Some(d), None) => {
                         if let Some(h) = Self::get_heading_error(d) {
                             heading_error = h;
+                            heading_error = heading_error.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
                         }
                     }
                     (None, Some(d)) => {
                         if let Some(h) = Self::get_heading_error(d) {
                             heading_error = -h; // invert (heading error is opposed to where we want to go)
+                            heading_error = heading_error.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
                         }
                     }
                     (Some(ld), Some(rd)) => {
                         // add both
-                        if let Some(h) = Self::get_heading_error(ld) {
+                        let left = Self::get_heading_error(ld);
+                        if let Some(h) = left {
                             heading_error = h;
                         }
-                        if let Some(h) = Self::get_heading_error(rd) {
+                        let right = Self::get_heading_error(rd);
+                        if let Some(h) = right {
                             heading_error -= h;
+                        }
+                        if left.is_some() || right.is_some() {
+                            heading_error = heading_error.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
                         }
                     }
                     (None, None) => {}
@@ -266,7 +274,7 @@ impl TrajectorySegment for StraightLine {
     }
 }
 
-const SIDE_WALL_STALE_MEASUREMENT: Duration = Duration::from_millis(70);
+const SIDE_WALL_STALE_MEASUREMENT: Duration = Duration::from_millis(150);
 const FOLLOWED_WALL_MAX_DIST: f32 = LAB_CELL - ROBOT_WIDTH;
 
 impl StraightLine {
@@ -280,10 +288,11 @@ impl StraightLine {
 
     fn get_heading_error(distance_middle_to_wall: f32) -> Option<f32> {
         let remaining = (distance_middle_to_wall - ROBOT_WIDTH / 2.0).max(0.0);
-        if remaining < LATERAL_CLEARANCE {
+        const PREFERRED_CLEARANCE: f32 = LATERAL_CLEARANCE + 0.015;
+        if remaining < PREFERRED_CLEARANCE {
             Some(SINGLE_WALL_STEERING_ANGLE_MULTIPLIER
-                * (LATERAL_CLEARANCE - remaining)
-                / LATERAL_CLEARANCE)
+                * (PREFERRED_CLEARANCE - remaining)
+                / PREFERRED_CLEARANCE)
         } else {
             None
         }

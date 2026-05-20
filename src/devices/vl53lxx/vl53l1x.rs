@@ -1,7 +1,8 @@
+use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask};
 use crate::devices::vl53lxx::{Config, MeasurementData};
-use crate::utils::{DurationUtils, WithInstant};
-use defmt::{Format, debug, info, trace, warn};
 use crate::utils::FairSelect3;
+use crate::utils::{DurationUtils, HertzUtils, WithInstant};
+use defmt::{Format, debug, info, trace, warn};
 use embassy_futures::select::Either3;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::i2c;
@@ -53,7 +54,8 @@ pub struct DistanceSnapshot {
 /// three watches; main maze-runner also reads MIDDLE; future wall-mapper / fusion lateral
 /// correction will add more. 4 leaves headroom without spending much RAM.
 pub type DistWatch = Watch<CriticalSectionRawMutex, WithInstant<RangingMeasurementData>, 4>;
-pub type DistReceiver<'a> = Receiver<'a, CriticalSectionRawMutex, WithInstant<RangingMeasurementData>, 4>;
+pub type DistReceiver<'a> =
+Receiver<'a, CriticalSectionRawMutex, WithInstant<RangingMeasurementData>, 4>;
 
 /// Sensor looking 45° to the left (mounted on the right side of the robot, crossed).
 pub static VL53L1X_45D_LEFT_WATCH: DistWatch = Watch::new();
@@ -203,15 +205,15 @@ pub async fn distance_sensor_task(
         let either3 = FairSelect3::new(
             priority,
             embassy_time::with_timeout(
-                Duration::from_millis(80),
+                Duration::from_millis(150),
                 sensor_45d_right.gpio_interrupt.wait_for_low(),
             ),
             embassy_time::with_timeout(
-                Duration::from_millis(80),
+                Duration::from_millis(150),
                 sensor_middle.gpio_interrupt.wait_for_low(),
             ),
             embassy_time::with_timeout(
-                Duration::from_millis(80),
+                Duration::from_millis(150),
                 sensor_45d_left.gpio_interrupt.wait_for_low(),
             ),
         )
@@ -298,6 +300,11 @@ pub async fn distance_sensor_task(
                 sensor_45d_right.xshut_pin.set_low();
                 sensor_middle.xshut_pin.set_low();
                 sensor_45d_left.xshut_pin.set_low();
+
+                let _ = BUZZER_CHANNEL.try_send(BuzzerTask {
+                    freq: 1500.hz(),
+                    duration: 200.ms(),
+                });
 
                 // SWRST: saves CCR/TRISE/CR2, clears BSY, restores config, re-enables PE
                 VL53L1XSensor::i2c_swrst_recovery();

@@ -96,32 +96,32 @@ pub async fn positioning_task(mpu: &'static mut Mpu9250Sensor) {
         }
 
         // Detect hall-sensor freeze: cumulative tick counters haven't moved this window.
-        let left_cum = LEFT_TICKS_CUMULATIVE.load(Ordering::Relaxed);
-        let right_cum = RIGHT_TICKS_CUMULATIVE.load(Ordering::Relaxed);
-        let left_dt = left_cum.wrapping_sub(last_left_cum);
-        let right_dt = right_cum.wrapping_sub(last_right_cum);
-        last_left_cum = left_cum;
-        last_right_cum = right_cum;
-        if left_dt == 0 && right_dt == 0 {
-            zero_tick_streak += 1;
-            // 25 × 20 ms = 500 ms with zero ticks on both wheels: well past anything explainable
-            // by quantisation (one tick every ~22 ms at 1 m/s), so something is wrong.
-            // Log once at the threshold and every ~1 s after, with the commanded-vs-actual state.
-            if zero_tick_streak == 25 || zero_tick_streak % 50 == 0 {
-                warn!(
-                    "No hall ticks for {} consecutive 20ms windows; fusion v_forward={}",
-                    zero_tick_streak, state.v_forward
-                );
-            }
-        } else if zero_tick_streak > 0 {
-            if zero_tick_streak >= 25 {
-                debug!(
-                    "Hall ticks resumed after {} silent windows (L+{} R+{})",
-                    zero_tick_streak, left_dt, right_dt
-                );
-            }
-            zero_tick_streak = 0;
-        }
+        // let left_cum = LEFT_TICKS_CUMULATIVE.load(Ordering::Relaxed);
+        // let right_cum = RIGHT_TICKS_CUMULATIVE.load(Ordering::Relaxed);
+        // let left_dt = left_cum.wrapping_sub(last_left_cum);
+        // let right_dt = right_cum.wrapping_sub(last_right_cum);
+        // last_left_cum = left_cum;
+        // last_right_cum = right_cum;
+        // if left_dt == 0 && right_dt == 0 {
+        //     zero_tick_streak += 1;
+        //     // 25 × 20 ms = 500 ms with zero ticks on both wheels: well past anything explainable
+        //     // by quantization (one tick every ~22 ms at 1 m/s), so something is wrong.
+        //     // Log once at the threshold and every ~1 s after, with the commanded-vs-actual state.
+        //     if zero_tick_streak == 25 || zero_tick_streak % 50 == 0 {
+        //         warn!(
+        //             "No hall ticks for {} consecutive 20ms windows; fusion v_forward={}",
+        //             zero_tick_streak, state.v_forward
+        //         );
+        //     }
+        // } else if zero_tick_streak > 0 {
+        //     if zero_tick_streak >= 25 {
+        //         debug!(
+        //             "Hall ticks resumed after {} silent windows (L+{} R+{})",
+        //             zero_tick_streak, left_dt, right_dt
+        //         );
+        //     }
+        //     zero_tick_streak = 0;
+        // }
 
         // flash_log!("Fusion: {}", state);
 
