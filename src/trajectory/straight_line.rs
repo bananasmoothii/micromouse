@@ -47,7 +47,6 @@ const MAX_STEERING: f32 = 0.20;
 
 /// per tick
 const SINGLE_WALL_STEERING_ANGLE_MULTIPLIER: f32 = 0.45;
-const MAX_SINGLE_WALL_STEERING: f32 = 0.3;
 
 /// Minimum commanded speed during deceleration — lower than MIN_USABLE_SPEED so friction dominates.
 /// Requires the MIN_USABLE_PWM snap in motors.rs to be removed.
@@ -134,54 +133,6 @@ impl TrajectorySegment for StraightLine {
             let avg_ticks = (left_ticks + right_ticks) / 2;
             let distance = avg_ticks as f32 * DISTANCE_PER_TICK;
 
-            // Heading error: how much the robot has rotated from its initial direction.
-            // Normalized to ±π so wrap-around near ±180° doesn't produce spurious corrections.
-
-            let left_dist = Self::get_wall_dist(&mut left_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
-            let right_dist = Self::get_wall_dist(&mut right_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
-
-            let mut heading_error = current_pos.theta - initial_theta;
-
-            // change heading_error if necessary
-            match (left_dist, right_dist) {
-                (Some(d), None) => {
-                    if let Some(h) = Self::get_heading_error(d) {
-                        heading_error = h;
-                    }
-                }
-                (None, Some(d)) => {
-                    if let Some(h) = Self::get_heading_error(d) {
-                        heading_error = -h; // invert (heading error is opposed to where we want to go)
-                    }
-                }
-                (Some(ld), Some(rd)) => {
-                    // add both
-                    if let Some(h) = Self::get_heading_error(ld) {
-                        heading_error = h;
-                    }
-                    if let Some(h) = Self::get_heading_error(rd) {
-                        heading_error -= h;
-                    }
-                }
-                (None, None) => {}
-            }
-            if left_dist.is_some() || right_dist.is_some() {
-                heading_error = heading_error.clamp(-MAX_SINGLE_WALL_STEERING, MAX_SINGLE_WALL_STEERING);
-            }
-
-            if heading_error > PI {
-                heading_error -= 2.0 * PI;
-            }
-            if heading_error < -PI {
-                heading_error += 2.0 * PI;
-            }
-            heading_integral = (heading_integral
-                + heading_error * (UPDATE_INTERVAL_MS as f32 / 1000.0))
-                .clamp(-MAX_STEERING_INTEGRAL, MAX_STEERING_INTEGRAL);
-            let steer_p = -(KP_STEERING * heading_error);
-            let steer_i = -(KI_STEERING * heading_integral);
-            let steering = (steer_p + steer_i).clamp(-MAX_STEERING, MAX_STEERING);
-
             if avg_ticks >= target_ticks {
                 flash_log!(
                     "Distance reached: left {} ticks ({} turns), right {} ticks ({} turns), speed error: {}",
@@ -238,6 +189,52 @@ impl TrajectorySegment for StraightLine {
             } else {
                 pi_out.clamp(sign * min_speed, sign * 1.5 * MAX_SPEED_M_S)
             };
+
+
+            // Heading error: how much the robot has rotated from its initial direction.
+            // Normalized to ±π so wrap-around near ±180° doesn't produce spurious corrections.
+            let mut heading_error = current_pos.theta - initial_theta;
+            let left_dist = Self::get_wall_dist(&mut left_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
+            let right_dist = Self::get_wall_dist(&mut right_rcv); //.filter(|&it| it <= LAB_CELL * 1.25);
+            // change heading_error if necessary
+            if in_decel && target_speed <= DECEL_MIN_SPEED + 0.2 {
+                match (left_dist, right_dist) {
+                    (Some(d), None) => {
+                        if let Some(h) = Self::get_heading_error(d) {
+                            heading_error = h;
+                        }
+                    }
+                    (None, Some(d)) => {
+                        if let Some(h) = Self::get_heading_error(d) {
+                            heading_error = -h; // invert (heading error is opposed to where we want to go)
+                        }
+                    }
+                    (Some(ld), Some(rd)) => {
+                        // add both
+                        if let Some(h) = Self::get_heading_error(ld) {
+                            heading_error = h;
+                        }
+                        if let Some(h) = Self::get_heading_error(rd) {
+                            heading_error -= h;
+                        }
+                    }
+                    (None, None) => {}
+                }
+            }
+            if heading_error > PI {
+                heading_error -= 2.0 * PI;
+            }
+            if heading_error < -PI {
+                heading_error += 2.0 * PI;
+            }
+            heading_integral = (heading_integral
+                + heading_error * (UPDATE_INTERVAL_MS as f32 / 1000.0))
+                .clamp(-MAX_STEERING_INTEGRAL, MAX_STEERING_INTEGRAL);
+            let steer_p = -(KP_STEERING * heading_error);
+            let steer_i = -(KI_STEERING * heading_integral);
+            let steering = (steer_p + steer_i).clamp(-MAX_STEERING, MAX_STEERING);
+
+
             let active_steering = if in_brake { 0.0 } else { steering };
             flash_log!(
                 "StraightLine ({}/{}m): target: {}{}, current: {}, error: {}, commanded: {}, p: {}, i: {}, steer: {}, steer_p: {}, steer_i: {}, L: {} M: {} R: {}, hdg: {}deg, theta: {}deg",

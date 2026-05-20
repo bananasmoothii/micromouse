@@ -1,7 +1,8 @@
 use crate::devices::vl53lxx::{Config, MeasurementData};
 use crate::utils::{DurationUtils, WithInstant};
 use defmt::{Format, debug, info, trace, warn};
-use embassy_futures::select::{Either3, select3};
+use crate::utils::FairSelect3;
+use embassy_futures::select::Either3;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::i2c;
 use embassy_stm32::i2c::{I2c, Master};
@@ -195,9 +196,12 @@ pub async fn distance_sensor_task(
     mut sensor_45d_left: VL53L1XSensor,
 ) -> ! {
     debug!("Distance sensor task running");
+    let mut priority = 0u8;
     loop {
         // Wait for data-ready interrupt, or poll at the sensor period as fallback.
-        let either3 = select3(
+        // FairSelect3 rotates which future is polled first to avoid starvation under CPU load.
+        let either3 = FairSelect3::new(
+            priority,
             embassy_time::with_timeout(
                 Duration::from_millis(80),
                 sensor_45d_right.gpio_interrupt.wait_for_low(),
@@ -212,6 +216,7 @@ pub async fn distance_sensor_task(
             ),
         )
         .await;
+        priority = priority.wrapping_add(1) % 3;
 
         let sensor: &mut VL53L1XSensor;
         let watch: &DistWatch;

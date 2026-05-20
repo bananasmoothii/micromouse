@@ -1,4 +1,8 @@
 use core::cell::Cell;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll};
+use embassy_futures::select::Either3;
 use embassy_stm32::time::Hertz;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::RawMutex;
@@ -106,6 +110,56 @@ impl MathUtils for f32 {
     #[inline]
     fn square(&self) -> f32 {
         self * self
+    }
+}
+
+/// `select3` with rotating priority to avoid always starving B and C when A is frequently ready.
+///
+/// Pass a `priority` counter (0–2) that you increment each loop iteration; this future starts
+/// polling from that index so each future gets a turn at the front.
+pub struct FairSelect3<A, B, C> {
+    pub a: A,
+    pub b: B,
+    pub c: C,
+    /// Index (0=A, 1=B, 2=C) of the future that gets polled first.
+    pub priority: u8,
+}
+
+/// Same as Select3 but uses round-robin
+impl<A, B, C> FairSelect3<A, B, C> {
+    pub fn new(priority: u8, a: A, b: B, c: C) -> Self {
+        Self { a, b, c, priority }
+    }
+}
+
+impl<A: Future, B: Future, C: Future> Future for FairSelect3<A, B, C> {
+    type Output = Either3<A::Output, B::Output, C::Output>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        for i in 0..3u8 {
+            match (this.priority + i) % 3 {
+                0 => {
+                    let a = unsafe { Pin::new_unchecked(&mut this.a) };
+                    if let Poll::Ready(x) = a.poll(cx) {
+                        return Poll::Ready(Either3::First(x));
+                    }
+                }
+                1 => {
+                    let b = unsafe { Pin::new_unchecked(&mut this.b) };
+                    if let Poll::Ready(x) = b.poll(cx) {
+                        return Poll::Ready(Either3::Second(x));
+                    }
+                }
+                _ => {
+                    let c = unsafe { Pin::new_unchecked(&mut this.c) };
+                    if let Poll::Ready(x) = c.poll(cx) {
+                        return Poll::Ready(Either3::Third(x));
+                    }
+                }
+            }
+        }
+        Poll::Pending
     }
 }
 
