@@ -7,6 +7,30 @@ const TIMELINE_DATA = {
       "color": "#818cf8",
       "commits": [
         {
+          "hash": "00a497e0",
+          "date": "2026-05-20T20:04:47",
+          "author": "Bananasmoothii",
+          "message": "Timeline website !",
+          "merged": false,
+          "mine": true
+        },
+        {
+          "hash": "b75776d4",
+          "date": "2026-05-20T20:00:51",
+          "author": "Bananasmoothii",
+          "message": "Alright, can't do more without Fablab",
+          "merged": false,
+          "mine": true
+        },
+        {
+          "hash": "6283934e",
+          "date": "2026-05-20T19:06:27",
+          "author": "Bananasmoothii",
+          "message": "Almost perfect straight line in corridor !",
+          "merged": false,
+          "mine": true
+        },
+        {
           "hash": "d6b86efe",
           "date": "2026-05-20T14:20:25",
           "author": "Bananasmoothii",
