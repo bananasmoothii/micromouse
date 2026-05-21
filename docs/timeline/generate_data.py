@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-MAIN_REPO  = SCRIPT_DIR.parent          # micromouse/
+MAIN_REPO  = SCRIPT_DIR.parent.parent          # micromouse/
 REPO_BASE  = MAIN_REPO.parent           # Rust/
 
 # filter_author=False  →  include every author's commits (with mine: true/false)
