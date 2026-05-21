@@ -166,6 +166,14 @@ function buildMedia(mediaItems, startMs) {
       if (idx !== -1) openLightbox(idx);
     });
 
+    // Hide bubble if media fails to load (e.g., .gitignored files)
+    const mediaNode = bubble.querySelector('img, video');
+    if (mediaNode) {
+      mediaNode.addEventListener('error', () => {
+        bubble.style.display = 'none';
+      });
+    }
+
     area.appendChild(bubble);
   }
 }
