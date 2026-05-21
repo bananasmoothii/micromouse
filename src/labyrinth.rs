@@ -1,16 +1,10 @@
 use alloc::vec::Vec;
+use crate::trajectory::CardinalHeading;
 
-pub const LAB_SIZE: usize = 16;
+pub const LAB_SIZE: usize = 8;
 
-const LAB_EXIT_X: usize = 10;
-const LAB_EXIT_Y: usize = 10;
-
-enum Direction {
-    South = 0,
-    North,
-    East,
-    West,
-}
+const LAB_EXIT_X: usize = 5;
+const LAB_EXIT_Y: usize = 5;
 
 #[derive(Copy, Clone)]
 pub struct Cell {
@@ -31,7 +25,7 @@ pub enum Wall {
 }
 
 pub struct Labyrinth {
-    cells: [[Cell; 16]; 16],
+    cells: [[Cell; LAB_SIZE]; LAB_SIZE],
 }
 
 impl Wall {
@@ -56,21 +50,21 @@ impl Labyrinth {
         }
     }
 
-    fn has_wall(self, x: usize, y: usize, dir: Direction) -> bool {
+    fn has_wall(self, x: usize, y: usize, dir: CardinalHeading) -> bool {
         match dir {
-            Direction::South => y == LAB_SIZE || self.has_south_wall(x, y),
-            Direction::North => y == 0 || self.has_south_wall(x, y-1),
-            Direction::East => x == LAB_SIZE || self.has_east_wall(x, y),
-            Direction::West => x == 0 || self.has_east_wall(x-1, y),
+            CardinalHeading::South => y == LAB_SIZE || self.has_south_wall(x, y),
+            CardinalHeading::North => y == 0 || self.has_south_wall(x, y - 1),
+            CardinalHeading::East => x == LAB_SIZE || self.has_east_wall(x, y),
+            CardinalHeading::West => x == 0 || self.has_east_wall(x - 1, y),
         }
     }
 
-    fn ray_wall(&mut self, x: usize, y: usize, dir: Direction, seen: bool) {
+    fn ray_wall(&mut self, x: usize, y: usize, dir: CardinalHeading, seen: bool) {
         match dir {
-            Direction::South => if y != LAB_SIZE {self.ray_south_wall(x, y, seen)},
-            Direction::North => if y == 0 {self.ray_south_wall(x, y-1, seen)},
-            Direction::East => if x == LAB_SIZE {self.ray_east_wall(x, y, seen)},
-            Direction::West => if x == 0 {self.ray_east_wall(x-1, y, seen)},
+            CardinalHeading::South => if y != LAB_SIZE { self.ray_south_wall(x, y, seen) },
+            CardinalHeading::North => if y == 0 { self.ray_south_wall(x, y - 1, seen) },
+            CardinalHeading::East => if x == LAB_SIZE { self.ray_east_wall(x, y, seen) },
+            CardinalHeading::West => if x == 0 { self.ray_east_wall(x - 1, y, seen) },
         }
     }
     pub fn has_south_wall(&self, x: usize, y: usize) -> bool {
@@ -143,7 +137,7 @@ impl Labyrinth {
             return;
         }
 
-        let mut best = 16*16; // theorical max
+        let mut best = LAB_SIZE * LAB_SIZE; // theorical max
 
         self.cells[y][x].exit_distance = best;
 
@@ -166,7 +160,7 @@ impl Labyrinth {
             }
         }
 
-        if best == 16*16 {
+        if best == LAB_SIZE * LAB_SIZE {
             self.cells[y][x].exit_distance = best;
             return;
         }

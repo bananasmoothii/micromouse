@@ -18,11 +18,10 @@ use crate::devices::hall_sensor_3144;
 use crate::devices::motors::{Motor, WheelSide};
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::positioning::positioning_task;
-use crate::trajectory::TrajectorySegment;
-use crate::trajectory::straight_line::{StraightLine, StraightLineGoal};
+use crate::labyrinth::Labyrinth;
+use crate::trajectory::{CardinalHeading, LabyrinthPlan};
 use crate::utils::{DurationUtils, HertzUtils};
 use alloc::boxed::Box;
-use alloc::vec;
 use alloc::vec::Vec;
 use defmt::*;
 use defmt_rtt as _;
@@ -41,7 +40,6 @@ use embassy_stm32::{bind_interrupts, interrupt};
 use embassy_stm32::{i2c, spi, rcc};
 use embedded_alloc::LlffHeap as Heap;
 use crate::i2c_devices::init_i2c_devices;
-use crate::trajectory::in_place_turn::InPlaceTurn;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -235,7 +233,7 @@ async fn main(mut spawner: Spawner) {
         .unwrap();
 
     spawner
-        .spawn(motor_tests(motor_left, motor_right, flash))
+        .spawn(maze_runner_task(motor_left, motor_right, flash))
         .unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
@@ -261,35 +259,102 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
     }
 }
 
+// ── Maze runner ─────────────────────────────────────────────────────────────
+
+// Start cell and initial heading.  Edit these to change the launch position.
+const START_X: usize = 0;
+const START_Y: usize = 0;
+const START_HEADING: CardinalHeading = CardinalHeading::East;
+// Distance from the front wall at which the robot stops, centred in the cell:
+//   (LAB_CELL - ROBOT_LENGTH) / 2  =  (0.18 - 0.13) / 2  =  0.025 m
+const STOP_OFFSET: f32 = 0.025;
+
 #[embassy_executor::task]
-async fn motor_tests(
+async fn maze_runner_task(
     mut motor_left: Motor<'static, TIM3>,
     mut motor_right: Motor<'static, TIM2>,
     mut flash: Flash<'static, embassy_stm32::flash::Blocking>,
 ) {
     2.s_timer().await;
 
-    let segments: Vec<Box<dyn TrajectorySegment>> = vec![
-        Box::new(StraightLine {
-            goal: StraightLineGoal::DistanceToFrontWall(0.02),
-            out_speed: 0.0,
-        }),
-        // Box::new(InPlaceTurn::from_degrees(-90.0)),
-        // Box::new(StraightLine {
-        //     distance: 1.0,
-        //     out_speed: 0.0,
-        // }),
-        // Box::new(InPlaceTurn::from_degrees(-90.0)),
-        // Box::new(StraightLine {
-        //     distance: 1.0,
-        //     out_speed: 0.0,
-        // }),
-        // Box::new(InPlaceTurn::from_degrees(-90.0)),
-        // Box::new(StraightLine {
-        //     distance: 1.0,
-        //     out_speed: 0.0,
-        // }),
-        // Box::new(InPlaceTurn::from_degrees(-90.0)),
+    let lab = build_known_maze();
+    let plan = LabyrinthPlan::from_labyrinth(&lab, START_X, START_Y, START_HEADING, STOP_OFFSET);
+    plan.execute(&mut motor_left, &mut motor_right, 200).await;
+
+    BUZZER_CHANNEL
+        .send(BuzzerTask { freq: 1047.hz(), duration: 500.ms() })
+        .await;
+    1.s_timer().await;
+    flash_log::flush(&mut flash);
+}
+
+/// Known 8×8 test maze.  Exit at (5, 5).
+///
+/// ```text
+///      x:  0    1    2    3    4    5    6    7
+///        ┌────┬────┬────┬────┬────┬────┬────┬────┐
+///   y=0  │ S  →    →    →    →    ↓   │         │
+///        ╞════╪════╪════╪════╪════╝   ╞════╪════╡  ← south walls (x=0..4)
+///   y=1  │                        ↓   ‖         │
+///   y=2  │                        ↓   ‖         │  ← east walls (x=5, y=1..4)
+///   y=3  │                        ↓   ‖         │
+///   y=4  │                        ↓   ‖         │
+///        │                        ╞═══╡         │  ← south wall (x=5, y=5 = exit)
+///   y=5  │                        E             │
+///        └────┴────┴────┴────┴────┴────┴────┴────┘
+///
+///  →↓ robot path   S start (0,0)   E exit (5,5)
+///  ╞═╡ south wall   ‖ east wall
+/// ```
+///
+/// Robot path: East 5 cells → turn right → South 5 cells → stop at exit.
+///
+/// Wall definitions
+/// ─────────────────
+/// south walls at y=0, x∈{0,1,2,3,4}  — floor of east corridor
+/// east wall at x=5, y∈{0,1,2,3,4}    — right wall of south corridor (also acts as
+///                                        "dead end to the east" forcing the turn)
+/// south wall at (x=5, y=5)            — exit stop wall
+fn build_known_maze() -> Labyrinth {
+    let mut lab = Labyrinth::new();
+
+    // Bottom wall of the east corridor (row 0)
+    for x in 0..5 {
+        lab.ray_south_wall(x, 0, true);
+    }
+
+    // Right wall of the south corridor (column 5) + dead end forcing east→south turn
+    for y in 0..5 {
+        lab.ray_east_wall(5, y, true);
+    }
+
+    // Stop wall at the exit cell
+    lab.ray_south_wall(5, 5, true);
+
+    lab
+}
+
+// ── Commented-out single-segment motor test (kept for reference) ─────────────
+/*
+#[embassy_executor::task]
+async fn motor_tests(
+    mut motor_left: Motor<'static, TIM3>,
+    mut motor_right: Motor<'static, TIM2>,
+    mut flash: Flash<'static, embassy_stm32::flash::Blocking>,
+) {
+    use crate::trajectory::straight_line::{StraightLine, StraightLineGoal};
+    use crate::trajectory::in_place_turn::InPlaceTurn;
+
+    2.s_timer().await;
+    let segments: alloc::vec::Vec<Box<dyn TrajectorySegment>> = alloc::vec![
+        Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.02), out_speed: 0.0 }),
+        Box::new(InPlaceTurn::from_degrees(90.0)),
+        Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.02), out_speed: 0.0 }),
+        Box::new(InPlaceTurn::from_degrees(90.0)),
+        Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.02), out_speed: 0.0 }),
+        Box::new(InPlaceTurn::from_degrees(90.0)),
+        Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.02), out_speed: 0.0 }),
+        Box::new(InPlaceTurn::from_degrees(90.0)),
     ];
     for segment in &segments {
         segment.execute(&mut motor_left, &mut motor_right).await;
@@ -297,178 +362,8 @@ async fn motor_tests(
         motor_right.set_speed(0.0);
         200.ms_timer().await;
     }
-    BUZZER_CHANNEL
-        .send(BuzzerTask {
-            freq: 1047.hz(),
-            duration: 500.ms(),
-        })
-        .await;
-
+    BUZZER_CHANNEL.send(BuzzerTask { freq: 1047.hz(), duration: 500.ms() }).await;
     1.s_timer().await;
     flash_log::flush(&mut flash);
-
-    /*
-        let speed = 0.75;
-        motor_left.set_speed(speed);
-        motor_right.set_speed(speed);
-
-        let start = Instant::now();
-
-        while Instant::now() - start < 2.s() {
-            debug!("current speed: {} m/s", CURRENT_POS.get().v_forward);
-            20.ms_timer().await;
-        }
-        motor_left.neutral();
-        motor_right.neutral();
-    */
-}
-
-/*
-/// Imaginary-maze test: executes cell-by-cell, updating wall knowledge from the
-/// forward ToF sensor after each step so the path adapts when walls appear/disappear.
-#[embassy_executor::task]
-async fn maze_runner_task() -> ! {
-    // Let positioning and sensors stabilize.
-    2.s_timer().await;
-    info!("Maze runner: starting");
-
-    // ── Imaginary labyrinth ─────────────────────────────────────────────────
-    // Edit these walls to change the test path.  The pathfinder targets (10,10).
-    let mut lab = Labyrinth::new();
-    for y in 0..4 {
-        lab.ray_east_wall(4, y, true);
-    } // vertical barrier at x=4
-    for x in 5..8 {
-        lab.ray_south_wall(x, 4, true);
-    } // horizontal barrier at y=4
-    lab.update_cell_distance(0, 0);
-    // ────────────────────────────────────────────────────────────────────────
-
-    loop {
-        // Current cell from EKF position.
-        let (cx, cy) = {
-            let s = CURRENT_STATE.lock(Cell::get);
-            let x = (s.x / LAB_CELL).round() as usize;
-            let y = (s.y / LAB_CELL).round() as usize;
-            (x.min(15), y.min(15))
-        };
-
-        if lab.exit_distance(cx, cy) == 0 {
-            info!("Maze runner: reached exit ({}, {})", cx, cy);
-            BUZZER_CHANNEL
-                .try_send(BuzzerTask {
-                    freq: 1047.hz(),
-                    duration: 600.ms(),
-                })
-                .ok();
-            loop {
-                5.s_timer().await;
-            }
-        }
-
-        // Drain the forward sensor and update the wall ahead.
-        let theta = CURRENT_STATE.lock(Cell::get).theta;
-        let heading = ((theta / (PI / 2.0)).round() as i32).rem_euclid(4);
-        // heading: 0=+x (East), 1=+y, 2=-x (West), 3=-y
-        let (dx, dy): (isize, isize) = match heading {
-            0 => (1, 0),
-            1 => (0, 1),
-            2 => (-1, 0),
-            _ => (0, -1),
-        };
-        if let Some(snap) = VL53L1X_MIDDLE_WATCH.receiver().and_then(|mut r| r.try_get()) {
-            // Treat stale snapshots as no observation.
-            if snap.at.elapsed() < embassy_time::Duration::from_millis(200) {
-                let wall = snap.data.get_distance_mm() < 90;
-                let nx = (cx as isize + dx) as usize;
-                let ny = (cy as isize + dy) as usize;
-                if nx < 16 && ny < 16 {
-                    if dx != 0 {
-                        lab.ray_east_wall(if dx > 0 { cx } else { nx }, cy, wall);
-                    } else {
-                        lab.ray_south_wall(cx, if dy > 0 { cy } else { ny }, wall);
-                    }
-                }
-            }
-        }
-
-        // Plan one cell forward and execute.
-        let (nx, ny) = lab.next_cell(cx, cy);
-        if nx == cx && ny == cy {
-            warn!("Maze runner: stuck at ({}, {}), retrying", cx, cy);
-            50.ms_timer().await;
-            continue;
-        }
-        info!("Maze runner: ({},{}) → ({},{})", cx, cy, nx, ny);
-
-        let raw = Trajectory::from_cell_path(&[(cx, cy), (nx, ny)]);
-        let raw = SmoothCornerOptimizer {
-            radius: trajectory::config::CORNER_RADIUS,
-            corner_speed: trajectory::config::CORNER_SPEED,
-        }
-            .optimize(raw);
-        let traj = VelocityProfileOptimizer {
-            max_acceleration: trajectory::config::MAX_ACCELERATION,
-        }
-            .optimize(raw);
-        traj.execute().await;
-    }
-}
-*/
-/*
-fn poc_trajectory_svg() {
-    use crate::labyrinth::Labyrinth;
-    use crate::trajectory::{
-        SmoothCornerOptimizer, Trajectory, TrajectoryOptimizer, VelocityProfileOptimizer,
-    };
-
-    info!("--- SVG POC START ---");
-    let mut lab = Labyrinth::new();
-
-    // Create a simple zig-zag obstacle course
-    lab.ray_east_wall(4, 0, true);
-    lab.ray_east_wall(4, 1, true);
-    lab.ray_east_wall(4, 2, true);
-    lab.ray_east_wall(4, 3, true);
-
-    lab.ray_south_wall(5, 4, true);
-    lab.ray_south_wall(6, 4, true);
-    lab.ray_south_wall(7, 4, true);
-
-    lab.update_cell_distance(0, 0); // Recompute distances based on walls
-
-    let raw_traj = Trajectory::build_from_labyrinth(&lab, 0, 0);
-
-    // 1. Smooth corners
-    let smooth_opt = SmoothCornerOptimizer {
-        radius: trajectory::config::CORNER_RADIUS,
-        corner_speed: trajectory::config::CORNER_SPEED,
-    };
-    let traj_smooth = smooth_opt.optimize(raw_traj);
-
-    // 2. Trapezoidal velocity profiling
-    let vel_opt = VelocityProfileOptimizer {
-        max_acceleration: trajectory::config::MAX_ACCELERATION,
-    };
-    let traj_opt = vel_opt.optimize(traj_smooth);
-
-    // Simulate to get points
-    let points = traj_opt.simulate(0.0, 0.0, 0.0);
-
-    // Print raw points as SVG polyline.
-    // println outputs raw text without timestamp or level.
-    println!("<svg viewBox=\"-0.1 -0.1 3.0 3.0\" xmlns=\"http://www.w3.org/2000/svg\">");
-    println!("<polyline points=\"");
-    for p in points {
-        println!("{},{}", p.0, p.1);
-    }
-    println!("\" fill=\"none\" stroke=\"red\" stroke-width=\"0.02\"/>");
-    println!("</svg>");
-    info!("--- SVG POC END ---");
-
-    // Hang forever so the rest of the firmware doesn't interfere
-    loop {
-        cortex_m::asm::wfi();
-    }
 }
 */
