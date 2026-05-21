@@ -7,6 +7,22 @@ const TIMELINE_DATA = {
       "color": "#818cf8",
       "commits": [
         {
+          "hash": "c2942666",
+          "date": "2026-05-21T10:33:58",
+          "author": "Bananasmoothii",
+          "message": "Handle missing media files gracefully",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "ae2bfb54",
+          "date": "2026-05-21T10:25:42",
+          "author": "Bananasmoothii",
+          "message": "fix data.js",
+          "merged": true,
+          "mine": true
+        },
+        {
           "hash": "f19f28ac",
           "date": "2026-05-21T10:24:14",
           "author": "Bananasmoothii",
@@ -1167,7 +1183,7 @@ const TIMELINE_DATA = {
       ]
     },
     {
-      "name": "mpu9250",
+      "name": "mpu9250-forked",
       "label": "MPU9250 driver",
       "color": "#c084fc",
       "commits": [
@@ -1437,11 +1453,6 @@ const TIMELINE_DATA = {
       "path": "media/PXL_20260511_144912905.mp4",
       "date": "2026-05-11T14:49:12",
       "type": "video"
-    },
-    {
-      "path": "media/PXL_20260512_104114566.jpg",
-      "date": "2026-05-12T10:41:14",
-      "type": "photo"
     },
     {
       "path": "media/PXL_20260513_104502830.mp4",

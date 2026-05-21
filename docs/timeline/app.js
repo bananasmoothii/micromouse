@@ -259,10 +259,16 @@ function buildLanes(repos, startMs) {
       dot.dataset.date    = commit.date;
       dot.dataset.hash    = commit.hash;
       dot.dataset.repo    = repo.label;
+      dot.dataset.repoName = repo.name;  // for GitHub links
       dot.dataset.author  = commit.author ?? '';
       dot.dataset.color   = repo.color;   // always repo color for tooltip header
       dot.dataset.merged  = commit.merged;
       dot.dataset.mine    = commit.mine ?? true;
+      dot.style.cursor = 'pointer';
+      dot.addEventListener('click', () => {
+        const url = `https://github.com/bananasmoothii/${repo.name}/commit/${commit.hash}`;
+        window.open(url, '_blank');
+      });
       lane.appendChild(dot);
     }
 

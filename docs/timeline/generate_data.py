@@ -36,7 +36,7 @@ REPOS = [
         "filter_author": True,
     },
     {
-        "name":          "mpu9250",
+        "name":          "mpu9250-forked",
         "label":         "MPU9250 driver",
         "path":          REPO_BASE / "mpu9250-forked",
         "color":         "#c084fc",
