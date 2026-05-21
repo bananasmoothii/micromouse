@@ -1,4 +1,4 @@
-# [Micromouse](https://github.com/bananasmoothii/micromouse)
+# [Bananasmoothii's Micromouse](https://github.com/bananasmoothii/micromouse)
 
 ![robot](./timeline/media/PXL_20260517_130954581.jpg)
 
