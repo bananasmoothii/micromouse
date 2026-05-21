@@ -208,6 +208,22 @@ impl TrajectorySegment for StraightLine {
                 }
             }
 
+            // If the front sensor has gone stale while we hold a stored target, that target
+            // was likely set from a wrong surface (e.g. a side wall seen during a mis-aligned
+            // entry). Reset everything so the next valid front reading starts fresh.
+            if tof_remaining_m.is_some()
+                && matches!(&self.goal, StraightLineGoal::DistanceToFrontWall(_))
+                && middle_rcv
+                .try_get()
+                .filter(|it| it.is_newer_than(SIDE_WALL_STALE_MEASUREMENT))
+                .is_none()
+            {
+                tof_remaining_m = None;
+                total_distance = f32::INFINITY;
+                target_ticks = i32::MAX;
+                in_decel = false;
+            }
+
             // Best estimate of remaining distance to stop:
             // For DistanceToFrontWall with a valid ToF reading: ToF remaining minus encoder delta
             // since that reading (over-counts, but error resets every ~66 ms on next reading).
