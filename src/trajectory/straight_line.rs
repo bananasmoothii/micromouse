@@ -192,23 +192,19 @@ impl TrajectorySegment for StraightLine {
                     last_front_at = Some(snap.at);
                     let d_front = snap.data.0.range_milli_meter as f32 / 1000.0;
                     let remaining = (d_front - *stop_offset).max(0.0);
-                    // Monotonic filter on raw remaining (before lag correction) so it stays
-                    // monotonic regardless of speed changes between readings.
-                    if tof_remaining_m.map_or(true, |prev| remaining <= prev) {
-                        // Sensor lag compensation: the measurement was taken ~SENSOR_LAG_S ago.
-                        // The robot moved v × SENSOR_LAG_S since then; subtract that so the seed
-                        // for encoder extrapolation reflects the actual current position.
-                        let lag_dist = current_pos.v_forward * SENSOR_LAG_S;
-                        let remaining_adj = (remaining - lag_dist).max(0.0);
-                        tof_remaining_m = Some(remaining_adj);
-                        distance_at_tof = distance;
-                        // Update total_distance for logging and in_brake guard; do NOT update
-                        // decel_distance / max_reachable_speed — encoder over-counting makes
-                        // total_distance drift upward on each reading, which would silently
-                        // widen the decel window and push the ramp floor into MIN_USABLE_SPEED.
-                        total_distance = distance + remaining_adj;
-                        target_ticks = (total_distance / DISTANCE_PER_TICK).round() as i32;
-                    }
+                    // Sensor lag compensation: the measurement was taken ~SENSOR_LAG_S ago.
+                    // The robot moved v × SENSOR_LAG_S since then; subtract that so the seed
+                    // for encoder extrapolation reflects the actual current position.
+                    let lag_dist = current_pos.v_forward * SENSOR_LAG_S;
+                    let remaining_adj = (remaining - lag_dist).max(0.0);
+                    tof_remaining_m = Some(remaining_adj);
+                    distance_at_tof = distance;
+                    // Update total_distance for logging and in_brake guard; do NOT update
+                    // decel_distance / max_reachable_speed — encoder over-counting makes
+                    // total_distance drift upward on each reading, which would silently
+                    // widen the decel window and push the ramp floor into MIN_USABLE_SPEED.
+                    total_distance = distance + remaining_adj;
+                    target_ticks = (total_distance / DISTANCE_PER_TICK).round() as i32;
                 }
             }
 
