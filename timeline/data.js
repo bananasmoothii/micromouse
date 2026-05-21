@@ -7,6 +7,38 @@ const TIMELINE_DATA = {
       "color": "#818cf8",
       "commits": [
         {
+          "hash": "332459aa",
+          "date": "2026-05-21T01:28:36",
+          "author": "Bananasmoothii",
+          "message": "DistanceToFrontWall: ToF-driven decel ramp and stop",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "7385bce3",
+          "date": "2026-05-20T21:35:37",
+          "author": "Bananasmoothii",
+          "message": "try one for DistanceToFrontWall(x)",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "1ddefd49",
+          "date": "2026-05-20T20:11:41",
+          "author": "Bananasmoothii",
+          "message": "start Presentation Soutenance.pptx",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "54e1a151",
+          "date": "2026-05-20T20:09:49",
+          "author": "Bananasmoothii",
+          "message": "new data 2",
+          "merged": true,
+          "mine": true
+        },
+        {
           "hash": "cdf64c05",
           "date": "2026-05-20T20:06:36",
           "author": "Bananasmoothii",
@@ -1433,6 +1465,11 @@ const TIMELINE_DATA = {
       "path": "media/PXL_20260518_084833173.mp4",
       "date": "2026-05-18T08:48:33",
       "type": "video"
+    },
+    {
+      "path": "media/PXL_20260521_001714262.jpg",
+      "date": "2026-05-21T00:17:14",
+      "type": "photo"
     }
   ]
 };
