@@ -288,47 +288,35 @@ async fn maze_runner_task(
     flash_log::flush(&mut flash);
 }
 
-/// Known 8×8 test maze.  Exit at (5, 5).
+/// S-shaped 8×8 test maze.  Exit at (5, 5).
 ///
-/// ```text
-///      x:  0    1    2    3    4    5    6    7
-///        ┌────┬────┬────┬────┬────┬────┬────┬────┐
-///   y=0  │ S  →    →    →    →    ↓   │         │
-///        ╞════╪════╪════╪════╪════╝   ╞════╪════╡  ← south walls (x=0..4)
-///   y=1  │                        ↓   ‖         │
-///   y=2  │                        ↓   ‖         │  ← east walls (x=5, y=1..4)
-///   y=3  │                        ↓   ‖         │
-///   y=4  │                        ↓   ‖         │
-///        │                        ╞═══╡         │  ← south wall (x=5, y=5 = exit)
-///   y=5  │                        E             │
-///        └────┴────┴────┴────┴────┴────┴────┴────┘
-///
-///  →↓ robot path   S start (0,0)   E exit (5,5)
-///  ╞═╡ south wall   ‖ east wall
-/// ```
-///
-/// Robot path: East 5 cells → turn right → South 5 cells → stop at exit.
-///
-/// Wall definitions
-/// ─────────────────
-/// south walls at y=0, x∈{0,1,2,3,4}  — floor of east corridor
-/// east wall at x=5, y∈{0,1,2,3,4}    — right wall of south corridor (also acts as
-///                                        "dead end to the east" forcing the turn)
-/// south wall at (x=5, y=5)            — exit stop wall
+/// Robot path: East×2 → right → South×3 → left → East×3 → right → South×2 → exit.
 fn build_known_maze() -> Labyrinth {
     let mut lab = Labyrinth::new();
 
-    // Bottom wall of the east corridor (row 0)
-    for x in 0..5 {
-        lab.ray_south_wall(x, 0, true);
-    }
+    // East corridor (row 0): floor + dead end
+    lab.ray_south_wall(0, 0, true);
+    lab.ray_south_wall(1, 0, true);
+    lab.ray_east_wall(2, 0, true);
 
-    // Right wall of the south corridor (column 5) + dead end forcing east→south turn
-    for y in 0..5 {
-        lab.ray_east_wall(5, y, true);
-    }
+    // South corridor (col 2, y=1..2): walls on both sides
+    lab.ray_east_wall(1, 1, true);
+    lab.ray_east_wall(1, 2, true);
+    lab.ray_east_wall(2, 1, true);
+    lab.ray_east_wall(2, 2, true);
+    // Stop wall + left-turn marker
+    lab.ray_south_wall(2, 3, true);
 
-    // Stop wall at the exit cell
+    // East corridor (row 3, x=3..4): walls on both sides
+    lab.ray_south_wall(3, 2, true);
+    lab.ray_south_wall(4, 2, true);
+    lab.ray_south_wall(3, 3, true);
+    lab.ray_south_wall(4, 3, true);
+    // Dead end → forces East→South
+    lab.ray_east_wall(5, 3, true);
+
+    // South corridor (col 5, y=4): east wall + exit stop
+    lab.ray_east_wall(5, 4, true);
     lab.ray_south_wall(5, 5, true);
 
     lab

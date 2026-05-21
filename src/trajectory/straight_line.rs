@@ -43,8 +43,11 @@ const MAX_INTEGRAL_CONTRIB: f32 = MAX_SPEED_M_S;
 /// Steering is a dimensionless wheel-speed asymmetry (see `set_speed_steered`); negated because
 /// CW rotation increases theta on this hardware.
 const KP_STEERING: f32 = 0.6;
-const KI_STEERING: f32 = 0.0;
+const KI_STEERING: f32 = 1.0;
 const MAX_STEERING_INTEGRAL: f32 = 0.15;
+/// When initial_heading_error is non-zero, treat the error as if it had been
+/// integrating for this many seconds to produce the seeded heading_integral.
+const HEADING_INTEGRAL_SEED_TIME: f32 = 0.5;
 const MAX_STEERING: f32 = 0.30;
 
 /// per tick
@@ -91,6 +94,12 @@ pub enum StraightLineGoal {
 pub struct StraightLine {
     pub goal: StraightLineGoal,
     pub out_speed: f32,
+    /// Angular error at segment start in radians: actual heading − target heading.
+    /// Non-zero when a preceding `InPlaceTurn` left a residual error.
+    /// Absorbed into `initial_theta` so the heading P term sees the true error
+    /// from tick one, and used to pre-seed the heading integral.
+    /// Set to `0.0` when no correction is needed (e.g. segment starts aligned).
+    pub initial_heading_error: f32,
 }
 
 #[async_trait::async_trait]
@@ -116,7 +125,9 @@ impl TrajectorySegment for StraightLine {
             .expect("ToF Watch receivers exhausted (N=4)");
 
         let start_pos = CURRENT_POS.get();
-        let initial_theta = start_pos.theta;
+        // Absorb the known start-of-segment heading error so the controller tries to
+        // maintain the *target* direction, not the (mis-aligned) actual start heading.
+        let initial_theta = start_pos.theta - self.initial_heading_error;
         let left_ticks_start = LEFT_TICKS_CUMULATIVE.load(Relaxed);
         let right_ticks_start = RIGHT_TICKS_CUMULATIVE.load(Relaxed);
         let mut target_ticks = if let Distance(d) = self.goal {
@@ -157,7 +168,15 @@ impl TrajectorySegment for StraightLine {
         let decel_start_distance = total_distance - decel_distance;
 
         let mut speed_integral = 0.0f32;
-        let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
+        // When a heading offset is provided (after a turn), reset the persisted integral
+        // (it came from a different corridor direction) and pre-seed with the known error.
+        // Otherwise carry the integral over from the previous segment (same direction run).
+        let mut heading_integral = if self.initial_heading_error.abs() > 0.002 {
+            (self.initial_heading_error * HEADING_INTEGRAL_SEED_TIME)
+                .clamp(-MAX_STEERING_INTEGRAL, MAX_STEERING_INTEGRAL)
+        } else {
+            f32::from_bits(HEADING_INTEGRAL.load(Relaxed))
+        };
         let mut in_decel = false;
         let mut left_rate_buf = WallRateBuffer::new();
         let mut right_rate_buf = WallRateBuffer::new();

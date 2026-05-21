@@ -41,7 +41,9 @@ pub enum PlanStep {
     /// Turn until the robot faces this absolute cardinal heading, correcting for drift.
     Turn(CardinalHeading),
     /// Drive forward until the front wall is `stop_offset` metres away, then stop.
-    Straight(f32),
+    /// The `CardinalHeading` is the expected corridor direction: used to compute
+    /// `initial_heading_error` from the live theta at execution time.
+    Straight(f32, CardinalHeading),
 }
 
 /// Abstract route derived from a `Labyrinth`.
@@ -105,7 +107,7 @@ impl LabyrinthPlan {
                 run_x = nnx;
                 run_y = nny;
             }
-            steps.push(PlanStep::Straight(stop_offset));
+            steps.push(PlanStep::Straight(stop_offset, cur_heading));
             cur_x = run_x;
             cur_y = run_y;
         }
@@ -141,10 +143,19 @@ impl LabyrinthPlan {
                         InPlaceTurn { angle }.execute(motor_left, motor_right).await;
                     }
                 }
-                PlanStep::Straight(stop_offset) => {
+                PlanStep::Straight(stop_offset, target_heading) => {
+                    // Compute heading residual from live theta after settle.
+                    // Captures both InPlaceTurn undershoot and any coast overshoot
+                    // during the settle wait, so StraightLine corrects from tick one.
+                    let actual_theta = CURRENT_POS.get().theta;
+                    let mut initial_heading_error =
+                        actual_theta - target_heading.to_robot_theta();
+                    while initial_heading_error > PI { initial_heading_error -= 2.0 * PI; }
+                    while initial_heading_error < -PI { initial_heading_error += 2.0 * PI; }
                     StraightLine {
                         goal: StraightLineGoal::DistanceToFrontWall(*stop_offset),
                         out_speed: 0.0,
+                        initial_heading_error,
                     }
                         .execute(motor_left, motor_right)
                         .await;

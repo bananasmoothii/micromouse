@@ -7,6 +7,54 @@ const TIMELINE_DATA = {
       "color": "#818cf8",
       "commits": [
         {
+          "hash": "d1f1de94",
+          "date": "2026-05-21T16:23:39",
+          "author": "Bananasmoothii",
+          "message": "labyrinth -> LabyrinthPlan -> TrajectorySegment",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "0fcd7b7d",
+          "date": "2026-05-21T14:47:13",
+          "author": "Bananasmoothii",
+          "message": "IT FUCKING WORKS",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "94ad9c07",
+          "date": "2026-05-21T14:31:19",
+          "author": "Bananasmoothii",
+          "message": "WORKS",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "78912ebf",
+          "date": "2026-05-21T14:18:13",
+          "author": "Bananasmoothii",
+          "message": "fix a little bit straightline when starting not perfectly aligned",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "1555ebd3",
+          "date": "2026-05-21T13:37:52",
+          "author": "Bananasmoothii",
+          "message": "straight line with DistanceToFrontWall works when start position is perfect",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "e6f05a57",
+          "date": "2026-05-21T10:59:40",
+          "author": "Bananasmoothii",
+          "message": "add feature",
+          "merged": true,
+          "mine": true
+        },
+        {
           "hash": "c2942666",
           "date": "2026-05-21T10:33:58",
           "author": "Bananasmoothii",
@@ -1521,6 +1569,21 @@ const TIMELINE_DATA = {
       "path": "media/PXL_20260521_001714262.jpg",
       "date": "2026-05-21T00:17:14",
       "type": "photo"
+    },
+    {
+      "path": "media/PXL_20260521_123521709.mp4",
+      "date": "2026-05-21T12:35:21",
+      "type": "video"
+    },
+    {
+      "path": "media/PXL_20260521_140405720.jpg",
+      "date": "2026-05-21T14:04:05",
+      "type": "photo"
+    },
+    {
+      "path": "media/PXL_20260521_150343175.mp4",
+      "date": "2026-05-21T15:03:43",
+      "type": "video"
     }
   ]
 };
