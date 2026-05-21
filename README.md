@@ -1,12 +1,12 @@
 # [Bananasmoothii's Micromouse](https://github.com/bananasmoothii/micromouse)
 
-![robot](./timeline/media/PXL_20260517_130954581.jpg)
+![robot](./docs/timeline/media/PXL_20260517_130954581.jpg)
 
 A school project aiming to make a Micromouse robot and make it solve a maze.
 
 This repo contains almost everything related to this project except the
-[**CAD models
-**](https://cad.onshape.com/documents/aaf7a6983651c7702bceaa13/w/41b76918edb6f00955c96fe0/e/62dd90809362918a445464ef)
+[**CAD models**](
+https://cad.onshape.com/documents/aaf7a6983651c7702bceaa13/w/41b76918edb6f00955c96fe0/e/62dd90809362918a445464ef)
 
 ## Hardware used
 

@@ -7,6 +7,22 @@ const TIMELINE_DATA = {
       "color": "#818cf8",
       "commits": [
         {
+          "hash": "75fb9ad0",
+          "date": "2026-05-21T10:15:04",
+          "author": "Bananasmoothii",
+          "message": "move timeline to /docs for github",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "cf5ddcd2",
+          "date": "2026-05-21T03:10:52",
+          "author": "Bananasmoothii",
+          "message": "forgot this",
+          "merged": true,
+          "mine": true
+        },
+        {
           "hash": "0d2f00bf",
           "date": "2026-05-21T03:08:15",
           "author": "Bananasmoothii",
@@ -932,219 +948,6 @@ const TIMELINE_DATA = {
           "author": "Bananasmoothii",
           "message": "srjstrh",
           "merged": true,
-          "mine": true
-        }
-      ]
-    },
-    {
-      "name": "vl53l0x",
-      "label": "VL53L0X driver",
-      "color": "#fb923c",
-      "commits": [
-        {
-          "hash": "afb05560",
-          "date": "2026-03-03T18:42:42",
-          "author": "Bananasmoothii",
-          "message": "make i2c public (useful for manual resets in somewhat sketchy code)",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "042f41d7",
-          "date": "2026-02-13T08:49:48",
-          "author": "Bananasmoothii",
-          "message": "Don't report SigmaFail anymore (requires more computations)",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "84a0caea",
-          "date": "2026-02-12T18:27:59",
-          "author": "Bananasmoothii",
-          "message": "add defmt to RangeStatus",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "890ecb25",
-          "date": "2026-02-12T18:26:25",
-          "author": "Bananasmoothii",
-          "message": "Merge pull request #1 from Induct-ie/master",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "21dffc1b",
-          "date": "2026-02-12T18:20:51",
-          "author": "Bananasmoothii",
-          "message": "add defmt as optional dependency",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "266992e9",
-          "date": "2026-02-09T13:01:08",
-          "author": "Bananasmoothii",
-          "message": ".gitignore",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "5771ec99",
-          "date": "2026-02-12T18:15:11",
-          "author": "Bananasmoothii",
-          "message": "idk",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "077871c6",
-          "date": "2026-02-09T20:54:28",
-          "author": "Bananasmoothii",
-          "message": "bump minor version",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "a685ded1",
-          "date": "2026-02-09T20:53:16",
-          "author": "Bananasmoothii",
-          "message": "add defmt as optional dependency",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "7e09be31",
-          "date": "2026-02-09T13:18:24",
-          "author": "Bananasmoothii",
-          "message": "Refactor in multiple files",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "6117cb66",
-          "date": "2026-02-09T13:01:08",
-          "author": "Bananasmoothii",
-          "message": ".gitignore",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "3f402020",
-          "date": "2026-02-09T13:00:29",
-          "author": "Bananasmoothii",
-          "message": "simplify code and add a feature for async i2c (from embassy-hal-async)",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "fcbdbd6b",
-          "date": "2026-02-09T12:18:58",
-          "author": "Bananasmoothii",
-          "message": "refactor VL53L0x driver to support async I2C operations and add embassy-sync dependency",
-          "merged": false,
-          "mine": true
-        }
-      ]
-    },
-    {
-      "name": "vl53l1",
-      "label": "VL53L1X driver",
-      "color": "#34d399",
-      "commits": [
-        {
-          "hash": "b05ac70d",
-          "date": "2026-04-26T13:11:07",
-          "author": "Bananasmoothii",
-          "message": "support changing i2c address: bump version",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "3e4089b0",
-          "date": "2026-04-26T13:08:01",
-          "author": "Bananasmoothii",
-          "message": "Keep stat_nvm in sync so init_and_start_range doesn't overwrite the register back to the old address.",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "c98772d2",
-          "date": "2026-04-26T12:06:39",
-          "author": "Bananasmoothii",
-          "message": "Make address changeable",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "634f0077",
-          "date": "2026-02-12T18:41:12",
-          "author": "Bananasmoothii",
-          "message": "cargo, gitignore",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "253b86d0",
-          "date": "2026-02-12T18:36:07",
-          "author": "Bananasmoothii",
-          "message": "comments",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "cde5c833",
-          "date": "2026-02-12T18:34:04",
-          "author": "Bananasmoothii",
-          "message": "try to add async everywhere",
-          "merged": false,
-          "mine": true
-        },
-        {
-          "hash": "b46f6bc8",
-          "date": "2026-02-01T23:44:10",
-          "author": "Bananasmoothii",
-          "message": "make it more robust",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "30613ac3",
-          "date": "2026-02-01T21:35:42",
-          "author": "Bananasmoothii",
-          "message": "make defmt optional",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "87a1548b",
-          "date": "2026-02-01T21:35:07",
-          "author": "Bananasmoothii",
-          "message": "Add doc from https://www.st.com/resource/en/application_note/an5263-configuring-the-vl53l1x-timeofflight-sensor-to-range-up-to-100-hz-stmicroelectronics.pdf",
-          "merged": true,
-          "mine": true
-        },
-        {
-          "hash": "c4363791",
-          "date": "2026-02-01T19:48:13",
-          "author": "Bananasmoothii",
-          "message": "IT WORKS",
-          "merged": true,
-          "mine": true
-        }
-      ]
-    },
-    {
-      "name": "mpu9250",
-      "label": "MPU9250 driver",
-      "color": "#c084fc",
-      "commits": [
-        {
-          "hash": "4bc31c80",
-          "date": "2026-02-15T13:21:42",
-          "author": "Bananasmoothii",
-          "message": "add defmt support",
-          "merged": false,
           "mine": true
         }
       ]
