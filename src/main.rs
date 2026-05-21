@@ -271,7 +271,7 @@ async fn motor_tests(
 
     let segments: Vec<Box<dyn TrajectorySegment>> = vec![
         Box::new(StraightLine {
-            goal: StraightLineGoal::DistanceToFrontWall(0.2),
+            goal: StraightLineGoal::DistanceToFrontWall(0.02),
             out_speed: 0.0,
         }),
         // Box::new(InPlaceTurn::from_degrees(-90.0)),

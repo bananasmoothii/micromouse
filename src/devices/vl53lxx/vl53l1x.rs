@@ -268,7 +268,7 @@ pub async fn distance_sensor_task(
                     let wrapped_data = RangingMeasurementData(data);
                     sensor.last_data = wrapped_data.clone();
 
-                    if sensor.device.address() == 0x30 {
+                    if sensor.device.address() == 0x31 {
                         trace!(
                             "VL53L1X {:#x} read: {} mm (raw {}), σ={} mm, {}",
                             sensor.device.address(),

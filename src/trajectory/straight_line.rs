@@ -69,6 +69,14 @@ const DECEL_I_FACTOR: f32 = 0.4;
 
 const BRAKE_DISTANCE: f32 = 0.00;
 
+const BRAKE_DISTANCE_TO_WALL: f32 = 0.01;
+
+/// VL53L1X pipelines 3-4 measurements before reporting; at 66 ms/measurement that
+/// is ~250 ms of structural lag between the physical event and the value we read.
+/// Subtract v × this constant from each accepted M reading so effective_remaining
+/// reflects where the robot actually is, not where it was 250 ms ago.
+const SENSOR_LAG_S: f32 = 0.250;
+
 static HEADING_INTEGRAL: AtomicU32 = AtomicU32::new(0f32.to_bits());
 
 pub enum StraightLineGoal {
@@ -136,7 +144,7 @@ impl TrajectorySegment for StraightLine {
         // ΔE = mgΔx = 1/2 m Δv² -> Δx = (v_max² - v_final²) / 2a  (with g = a)
         let decel_distance_full_speed =
             (MAX_SPEED_M_S.square() - self.out_speed.square()) / (2.0 * DECELERATION);
-        let (mut max_reachable_speed, mut decel_distance) =
+        let (max_reachable_speed, decel_distance) =
             if decel_distance_full_speed <= total_distance {
                 (MAX_SPEED_M_S, decel_distance_full_speed)
             } else {
@@ -146,7 +154,7 @@ impl TrajectorySegment for StraightLine {
                     total_distance,
                 )
             };
-        let mut decel_start_distance = total_distance - decel_distance;
+        let decel_start_distance = total_distance - decel_distance;
 
         let mut speed_integral = 0.0f32;
         let mut heading_integral = f32::from_bits(HEADING_INTEGRAL.load(Relaxed));
@@ -184,21 +192,23 @@ impl TrajectorySegment for StraightLine {
                     last_front_at = Some(snap.at);
                     let d_front = snap.data.0.range_milli_meter as f32 / 1000.0;
                     let remaining = (d_front - *stop_offset).max(0.0);
-                    tof_remaining_m = Some(remaining);
-                    distance_at_tof = distance;
-                    total_distance = distance + remaining;
-                    target_ticks = (total_distance / DISTANCE_PER_TICK).round() as i32;
-                    let ddf = (MAX_SPEED_M_S.square() - self.out_speed.square())
-                        / (2.0 * DECELERATION);
-                    (max_reachable_speed, decel_distance) = if ddf <= total_distance {
-                        (MAX_SPEED_M_S, ddf)
-                    } else {
-                        let v = (2.0 * DECELERATION * total_distance
-                            + self.out_speed.square())
-                            .sqrt();
-                        (v, total_distance)
-                    };
-                    decel_start_distance = total_distance - decel_distance;
+                    // Monotonic filter on raw remaining (before lag correction) so it stays
+                    // monotonic regardless of speed changes between readings.
+                    if tof_remaining_m.map_or(true, |prev| remaining <= prev) {
+                        // Sensor lag compensation: the measurement was taken ~SENSOR_LAG_S ago.
+                        // The robot moved v × SENSOR_LAG_S since then; subtract that so the seed
+                        // for encoder extrapolation reflects the actual current position.
+                        let lag_dist = current_pos.v_forward * SENSOR_LAG_S;
+                        let remaining_adj = (remaining - lag_dist).max(0.0);
+                        tof_remaining_m = Some(remaining_adj);
+                        distance_at_tof = distance;
+                        // Update total_distance for logging and in_brake guard; do NOT update
+                        // decel_distance / max_reachable_speed — encoder over-counting makes
+                        // total_distance drift upward on each reading, which would silently
+                        // widen the decel window and push the ramp floor into MIN_USABLE_SPEED.
+                        total_distance = distance + remaining_adj;
+                        target_ticks = (total_distance / DISTANCE_PER_TICK).round() as i32;
+                    }
                 }
             }
 
@@ -215,7 +225,7 @@ impl TrajectorySegment for StraightLine {
 
             let tof_stop = matches!(&self.goal, StraightLineGoal::DistanceToFrontWall(_))
                 && tof_remaining_m.is_some()
-                && effective_remaining <= 0.01;
+                && effective_remaining <= BRAKE_DISTANCE_TO_WALL;
             if avg_ticks >= target_ticks || tof_stop {
                 flash_log!(
                     "Distance reached: left {} ticks ({} turns), right {} ticks ({} turns), speed error: {}",
@@ -243,12 +253,15 @@ impl TrajectorySegment for StraightLine {
             let decel_target = if matches!(&self.goal, StraightLineGoal::DistanceToFrontWall(_))
                 && tof_remaining_m.is_some()
             {
-                if effective_remaining <= decel_distance {
-                    if !in_decel {
-                        in_decel = true;
-                        speed_integral *= DECEL_I_FACTOR;
-                    }
-                    (max_reachable_speed * effective_remaining / decel_distance).max(MIN_USABLE_SPEED)
+                if effective_remaining <= decel_distance && !in_decel {
+                    in_decel = true;
+                    speed_integral *= DECEL_I_FACTOR;
+                }
+                // Once in_decel, always apply the proportional ramp. When a corrected ToF reading
+                // shows more remaining than the encoder said (encoder over-counted), the formula
+                // gives > max_reachable_speed which gets clamped — no re-acceleration.
+                if in_decel {
+                    (max_reachable_speed * effective_remaining / decel_distance).max(DECEL_MIN_SPEED)
                 } else {
                     f32::INFINITY
                 }
@@ -276,7 +289,17 @@ impl TrajectorySegment for StraightLine {
             let in_brake = total_distance - distance <= BRAKE_DISTANCE;
             let sign = total_distance.signum();
             let pi_out = p + i;
-            let min_speed = if in_decel {
+            // For DistanceToFrontWall: when the robot is above the decel target (active braking),
+            // cut the motor floor to 0 so friction dominates rather than fighting it at
+            // DECEL_MIN_SPEED. This lets PI command ~0 → stronger braking, matching the 2.5 m/s²
+            // deceleration assumption. Distance(x) keeps DECEL_MIN_SPEED (encoder-based, unchanged).
+            let min_speed = if in_decel
+                && matches!(&self.goal, StraightLineGoal::DistanceToFrontWall(_))
+                && decel_target < f32::INFINITY
+                && current_pos.v_forward > decel_target
+            {
+                0.0
+            } else if in_decel {
                 DECEL_MIN_SPEED
             } else {
                 MIN_USABLE_SPEED
@@ -305,7 +328,7 @@ impl TrajectorySegment for StraightLine {
             // Blend wall-proximity correction into heading_error additively so that accumulated
             // theta drift is never discarded. The clamp bounds the wall term alone; the combined
             // total is then bounded by MAX_STEERING at the steer output.
-            if !in_decel || target_speed > DECEL_MIN_SPEED + 0.2 {
+            {
                 let h_l = left_dist
                     .and_then(|d| Self::get_heading_error(d))
                     .unwrap_or(0.0);
@@ -327,11 +350,19 @@ impl TrajectorySegment for StraightLine {
                         .unwrap_or(0.0);
                     sl - sr
                 };
-                heading_error += wall_correction.clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
+                // During decel the robot is legitimately converging on walls (end of cell), so
+                // high-gain wall correction oscillates against L/R asymmetry every 20 ms. Back
+                // off to 30% so the gyro-based theta term dominates, preventing ±12° swings.
+                let wall_scale = if in_decel { 0.3 } else { 1.0 };
+                heading_error +=
+                    (wall_correction * wall_scale).clamp(-MAX_WALL_STEERING, MAX_WALL_STEERING);
             }
-            // Approach-rate correction: left closing → steer right → error left (+), right closing → steer left → error right (−).
-            heading_error +=
-                KD_WALL * (left_rate_buf.approach_rate() - right_rate_buf.approach_rate());
+            // Approach-rate correction: disabled during decel because the robot is approaching
+            // the front wall legitimately, spiking approach rates and adding noise to heading.
+            if !in_decel {
+                heading_error +=
+                    KD_WALL * (left_rate_buf.approach_rate() - right_rate_buf.approach_rate());
+            }
             if heading_error > PI {
                 heading_error -= 2.0 * PI;
             }
