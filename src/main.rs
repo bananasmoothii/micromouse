@@ -19,7 +19,7 @@ use crate::devices::motors::{Motor, WheelSide};
 use crate::devices::mpu9250::Mpu9250Sensor;
 use crate::positioning::positioning_task;
 use crate::labyrinth::Labyrinth;
-use crate::trajectory::{CardinalHeading, LabyrinthPlan};
+use crate::trajectory::{CardinalHeading, LabyrinthPlan, TrajectorySegment};
 use crate::utils::{DurationUtils, HertzUtils};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -233,7 +233,7 @@ async fn main(mut spawner: Spawner) {
         .unwrap();
 
     spawner
-        .spawn(maze_runner_task(motor_left, motor_right, flash))
+        .spawn(motor_tests(motor_left, motor_right, flash))
         .unwrap();
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
@@ -323,7 +323,7 @@ fn build_known_maze() -> Labyrinth {
 }
 
 // ── Commented-out single-segment motor test (kept for reference) ─────────────
-/*
+
 #[embassy_executor::task]
 async fn motor_tests(
     mut motor_left: Motor<'static, TIM3>,
@@ -335,14 +335,14 @@ async fn motor_tests(
 
     2.s_timer().await;
     let segments: alloc::vec::Vec<Box<dyn TrajectorySegment>> = alloc::vec![
-        Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.02), out_speed: 0.0 }),
-        Box::new(InPlaceTurn::from_degrees(90.0)),
-        Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.02), out_speed: 0.0 }),
-        Box::new(InPlaceTurn::from_degrees(90.0)),
-        Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.02), out_speed: 0.0 }),
-        Box::new(InPlaceTurn::from_degrees(90.0)),
-        Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.02), out_speed: 0.0 }),
-        Box::new(InPlaceTurn::from_degrees(90.0)),
+        Box::new(StraightLine { goal: StraightLineGoal::Distance(1.0), out_speed: 0.0, initial_heading_error: 0.0 }),
+        // Box::new(InPlaceTurn::from_degrees(90.0)),
+        // Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.04), out_speed: 0.0, initial_heading_error: 0.0 }),
+        // Box::new(InPlaceTurn::from_degrees(90.0)),
+        // Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.04), out_speed: 0.0, initial_heading_error: 0.0 }),
+        // Box::new(InPlaceTurn::from_degrees(90.0)),
+        // Box::new(StraightLine { goal: StraightLineGoal::DistanceToFrontWall(0.04), out_speed: 0.0, initial_heading_error: 0.0 }),
+        // Box::new(InPlaceTurn::from_degrees(90.0)),
     ];
     for segment in &segments {
         segment.execute(&mut motor_left, &mut motor_right).await;
@@ -354,4 +354,4 @@ async fn motor_tests(
     1.s_timer().await;
     flash_log::flush(&mut flash);
 }
-*/
+
