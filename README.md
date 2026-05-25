@@ -37,3 +37,54 @@ cargo run
 The robot has a power mechanism that cuts power when battery isn't measured to be enough, but this requires you to
 maintain the button (on the back custom PCB) pressed when flashing the MCU. I recommend having an IDE keyboard
 shortcut for this command. Flashing often fails on the first try, if it does just try again.
+
+## Repository structure
+
+```
+micromouse/
+├── src/
+│   ├── main.rs                   — Embassy entry point: heap init, peripheral setup, task spawning
+│   ├── dimensions.rs             — Physical constants (cell size, wall thickness, wheel geometry)
+│   ├── i2c_devices.rs            — Sequential XSHUT-based I2C init for the 3 ToF sensors
+│   ├── flash_log.rs              — For storing logs in flash memory
+│   ├── labyrinth.rs              — 16×16 maze grid, probabilistic wall detection, pathfinding (flood-fill)
+│   ├── utils.rs                  — Shared utilities
+│   ├── panic_handler.rs          — Custom panic handler (logs then halts)
+│   │
+│   ├── devices/                  — Hardware drivers
+│   │   ├── motors.rs             — DC motor PI feedback loop, reads waypoints from PATH_CHANNEL
+│   │   ├── hall_sensor_3144.rs   — Interrupt-driven wheel encoders (AtomicI32 tick counters)
+│   │   ├── mpu9250.rs            — 9-DOF IMU over SPI (accel, gyro, magnetometer)
+│   │   ├── battery.rs            — 2-cell LiPo voltage monitoring via ADC
+│   │   ├── buzzer.rs             — PWM audio (TIM2), command channel-driven
+│   │   └── vl53lxx/              — ToF distance sensors
+│   │       ├── vl53l0x.rs        — VL53L0X driver (unused, kept for reference)
+│   │       └── vl53l1x.rs        — VL53L1X driver (distance sensors, runtime I2C address change)
+│   │
+│   ├── positioning/              — Sensor fusion and position tracking
+│   │   ├── mod.rs                — positioning_task: 20 ms sensor-fusion loop
+│   │   ├── odometry.rs           — Skid-steering wheel kinematics
+│   │   ├── mpu.rs                — Gyro → yaw, magnetometer → absolute heading
+│   │   ├── fusion.rs             — Kalman Filter (odometry + gyro + magnetometer)
+│   │   └── types.rs              — Position2D, MovementDelta
+│   │
+│   └── trajectory/               — Path planning and motion profiling
+│       ├── mod.rs                — Converts cell path → smooth velocity-profiled segments
+│       ├── straight_line.rs      — Straight segment with trapezoidal velocity profile
+│       └── in_place_turn.rs      — In-place rotation segment
+│
+├── docs/
+│   └── timeline/                 — Project timeline web app (photos, videos, notes)
+│
+├── issues_and_knowledge/         — Notes on hardware quirks and bugs encountered
+│   ├── architecture.md           — High-level architecture overview
+│   ├── embassy_exti_missed_ticks_fix.md
+│   ├── i2c_registers_and_pullups_explained.md
+│   ├── monster moto shield ressources.md
+│   └── vl53l1x_i2c_bsy_lockup_recovery.md
+│
+├── build.rs                      — Build script (linker script selection)
+├── Cargo.toml                    — Dependencies and patch section for forked sensor crates
+├── memory.x                      — Linker memory map for STM32F446RE
+└── .cargo/config.toml            — Default target (thumbv7em-none-eabi), runner (probe-rs), log level
+```
