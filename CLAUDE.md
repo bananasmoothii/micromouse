@@ -8,6 +8,8 @@ Embedded firmware for an autonomous **Micromouse** competition robot, targeting 
 MHz). The robot solves a 16×16 maze using ToF distance sensors, a 9-DOF IMU, and wheel odometry, with an Embassy-based
 async runtime.
 
+Code architecture can be found in ./issues_and_knowledge/architecture.md, but this document might not be up-to-date
+
 ## Build & Flash
 
 ```sh

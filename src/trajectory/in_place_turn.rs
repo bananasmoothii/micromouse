@@ -1,3 +1,30 @@
+//! In-place (pivot) turn: left and right wheels spin in opposite directions.
+//!
+//! ## Control law
+//! Position-form PI on the *remaining angle* error.  The output is a wheel tangential speed
+//! (m/s); the sign determines direction (positive → CCW).  Speed is clamped to
+//! `[MIN_TURN_SPEED, MAX_TURN_SPEED]` to overcome static friction and limit overshoot.
+//! Within `FINAL_ZONE_RAD` of the target the speed cap drops to `APPROACH_SPEED` for a gentler
+//! final approach.
+//!
+//! ## Coast estimation (early motor cut)
+//! At motor cut the robot coasts for a few degrees due to inertia.  The estimated coast angle
+//! is `ω² / (2 × FRICTION_DECEL)` (kinematic equation with constant Coulomb deceleration).
+//! When `|angle_remaining| ≤ coast_estimate`, motors are cut.  `FRICTION_DECEL` is tuned
+//! slightly below the real deceleration so the cut fires one 20 ms iteration earlier,
+//! compensating for the discrete-time discretisation that otherwise always under-cuts.
+//!
+//! ## Relative rotation tracking
+//! Rotation is accumulated as a running sum of `d_theta` increments rather than comparing
+//! absolute `theta` values.  This makes the turn direction robust to large gyro drift that
+//! might occur during a startup delay (e.g. ±90° drift could flip the perceived target direction
+//! if absolute comparison were used).
+//!
+//! ## Tuning notes
+//! - **Overshoot** → lower `FRICTION_DECEL` or raise `APPROACH_SPEED`.
+//! - **Undershoot** → raise `FRICTION_DECEL` or lower `MIN_TURN_SPEED`.
+//! - **Oscillation at final approach** → lower `KP_TURN` or raise `KI_TURN`.
+
 use alloc::boxed::Box;
 use crate::devices::motors::Motor;
 use crate::flash_log;

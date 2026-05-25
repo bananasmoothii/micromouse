@@ -1,3 +1,26 @@
+//! Sensor fusion pipeline: produces a fused [`PositionState`] every 20 ms.
+//!
+//! ## Data flow inside this module
+//! ```text
+//! hall ISRs → odometry::get_odom_delta() ──┐
+//!                                          ├→ fusion::SensorFusion::update() → CURRENT_POS
+//! MPU-9250 SPI read → mpu::MpuProcessor ───┘
+//! ```
+//!
+//! ## [`CURRENT_POS`]
+//! A `Mutex<CriticalSectionRawMutex, Cell<PositionState>>` that can be read from any task
+//! without blocking.  Consumers use the [`CellMutexUtils::get`] extension.
+//!
+//! ## Startup hard-iron calibration
+//! The task averages 3 magnetometer readings (60 ms) at boot to establish the static hard-iron
+//! offset.  The robot must be stationary during this window or the heading reference will be
+//! wrong.  The offset is passed to [`mpu::MpuProcessor::new`] and subtracted from every
+//! subsequent magnetometer reading.
+//!
+//! ## NaN watchdog
+//! Fusion inputs and outputs are checked for `NaN` / `Inf` each cycle and logged via RTT.
+//! This catches early sensor failures before they silently corrupt the controller.
+
 pub mod fusion;
 pub mod mpu;
 pub mod odometry;
@@ -52,6 +75,8 @@ pub async fn positioning_task(mpu: &'static mut Mpu9250Sensor) {
     // --- Diagnostic state for the "v_forward decays to zero while wheels keep spinning" freeze.
     // Tracks consecutive 20 ms windows where odometry reported no movement. If this grows large
     // while the commanded speed is non-zero, the EXTI hall ISR has likely stopped firing.
+    // CURRENTLY UNUSED: the watchdog loop below is commented out (it was too noisy in practice).
+    // Uncomment it to re-enable the diagnostic; the variables are kept so the code compiles.
     let mut zero_tick_streak: u32 = 0;
     let mut last_left_cum: i32 = LEFT_TICKS_CUMULATIVE.load(Ordering::Relaxed);
     let mut last_right_cum: i32 = RIGHT_TICKS_CUMULATIVE.load(Ordering::Relaxed);

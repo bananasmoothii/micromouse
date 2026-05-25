@@ -1,3 +1,30 @@
+//! Sensor fusion: two scalar Kalman filters combining gyro, odometry, and magnetometer.
+//!
+//! ## Architecture
+//! This is **not** a full EKF. A proper EKF propagates a joint `[x, y, θ]` state vector with
+//! a 3×3 covariance matrix through the nonlinear motion model using a Jacobian. Cross-covariance
+//! between heading and position is tracked. This implementation instead uses two *independent*
+//! scalar Kalman filters — one for `θ` and one for `(x, y)` — with the nonlinear rotation
+//! (cos/sin of `θ`) applied ad-hoc. It is simpler to tune and sufficient for a micromouse.
+//!
+//! ## Heading filter (`θ`)
+//! - **Predict**: integrate gyro `d_theta` (clamped to reject EMI spikes). `P += Q_THETA_GYRO`.
+//! - **Update 1 (odometry)**: only when both wheels have seen at least two consecutive ticks
+//!   (so a single asymmetric tick doesn't create a ~7.7° spurious turn heading update).
+//!   Measurement noise scales with angular rate squared to discount skid-steering slip in turns.
+//! - **Update 2 (magnetometer)**: large `R_THETA_MAG` keeps the correction gentle — motor-induced
+//!   hard-iron changes during movement cause large transient errors, so the mag is mainly useful
+//!   when the robot is stationary between moves.
+//!
+//! ## Position filter `(x, y)`
+//! - **Predict**: integrate `v_center × cos/sin(θ) × dt`. `P += Q_XY_VEL`.
+//! - **Update**: cumulative odometry global position (more stable than velocity over multiple steps).
+//!
+//! ## Tuning
+//! All `Q_*` and `R_*` constants are documented with the physical reasoning behind their values.
+//! Start with `R` values (measurement noise) and adjust `Q` (process noise) until the filter
+//! settles at a speed that matches your application's dynamics.
+
 use crate::devices::hall_sensor_3144::{LEFT_TICK_INTERVAL_CYCLES, RIGHT_TICK_INTERVAL_CYCLES};
 use crate::positioning::mpu::MpuResult;
 use crate::positioning::types::{MovementDelta, PositionState};
@@ -6,23 +33,6 @@ use core::sync::atomic::Ordering;
 use Ordering::Relaxed;
 use micromath::F32Ext;
 use crate::utils::MathUtils;
-
-// Note: this is NOT a proper EKF. A real EKF maintains a full [x, y, θ] state vector with a 3×3
-// covariance matrix and propagates uncertainty through the nonlinear motion model via a Jacobian.
-// What we have instead is two independent scalar Kalman filters (one for θ, one for XY) with the
-// nonlinear rotation (cos/sin of θ) applied ad-hoc. Cross-covariance between θ and XY is ignored.
-// This is simpler to tune and sufficient for a micromouse, but worth knowing if results disappoint.
-
-// --- How a scalar Kalman filter works ---
-// Each filter has one state value and one uncertainty estimate P.
-// Every step:
-//   Predict: state += model_update;  P += Q   (Q = how much uncertainty we add per step)
-//   Update:  K = P / (P + R)                  (K = Kalman gain, 0..1)
-//            state += K * (measurement - state)
-//            P *= (1 - K)
-// When P >> R → K ≈ 1 → trust measurement completely.
-// When P << R → K ≈ 0 → ignore measurement, keep current estimate.
-// Q and R are tuning parameters you set based on how noisy each source is.
 
 // --- Heading (θ) filter ---
 
@@ -69,6 +79,7 @@ const Q_XY_VEL: f32 = 0.0001;
 /// We use 0.02 m² (std dev ≈ 14 cm) as a conservative starting point — tighten once tested.
 const R_XY_ODOM: f32 = 0.02;
 
+/// Two-filter sensor fusion state. One instance lives in [`crate::positioning::positioning_task`].
 pub struct SensorFusion {
     state: PositionState,
     /// Cumulative odometry position in global frame, used as the absolute position measurement.
@@ -91,6 +102,9 @@ impl SensorFusion {
         }
     }
 
+    /// Runs one fusion cycle with the given odometry and IMU increments.
+    /// Returns the updated [`PositionState`] (also stored internally for the next call).
+    /// Call every 20 ms, immediately after [`crate::positioning::odometry::get_odom_delta`].
     pub fn update(&mut self, odom_delta: MovementDelta, mpu: MpuResult) -> PositionState {
         let omega_signed = if mpu.dt > 0.0 { mpu.d_theta / mpu.dt } else { 0.0 };
         let omega = omega_signed.abs();

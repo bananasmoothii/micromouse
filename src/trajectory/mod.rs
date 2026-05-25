@@ -1,3 +1,27 @@
+//! High-level trajectory planner: converts a [`Labyrinth`] into a sequence of executable moves.
+//!
+//! ## Coordinate / heading convention
+//! [`CardinalHeading`] uses **screen coordinates**: East = `+x`, South = `+y` (y increases
+//! downward).  Robot-world `theta` maps as: East → 0 rad, South → −π/2 rad, West → −π rad,
+//! North → +π/2 rad (counter-clockwise positive).
+//!
+//! ## Plan structure
+//! [`LabyrinthPlan`] is a flat list of [`PlanStep`]s built by following [`Labyrinth::next_cell`]
+//! from the start to the exit.  Consecutive cells in the same direction are collapsed into a
+//! single `Straight` step using `DistanceToFrontWall` so the robot always stops on a wall.
+//!
+//! ## Heading correction
+//! Before each `Turn`, the live heading from [`crate::positioning::CURRENT_POS`] is sampled.
+//! The difference from the target cardinal heading gives the *actual* angle to turn, correcting
+//! for any drift or undershoot from the previous `InPlaceTurn`.  Similarly, the live heading
+//! after the settle pause is used to seed the heading integral in `StraightLine`.
+//!
+//! ## Segment types
+//! | Type | File | Description |
+//! |---|---|---|
+//! | [`straight_line::StraightLine`] | `straight_line.rs` | PI speed + heading control, wall following |
+//! | [`in_place_turn::InPlaceTurn`] | `in_place_turn.rs` | Pivot turn with friction coast estimation |
+
 pub mod straight_line;
 pub mod in_place_turn;
 
@@ -12,8 +36,13 @@ use crate::trajectory::in_place_turn::InPlaceTurn;
 use crate::trajectory::straight_line::{StraightLine, StraightLineGoal};
 use crate::utils::{CellMutexUtils, DurationUtils};
 
+/// Control loop period in milliseconds. Shared by all trajectory segments.
 pub const UPDATE_INTERVAL_MS: u64 = 20;
 
+/// A single executable maneuver (straight line, turn, etc.).
+///
+/// Implementors drive the motors to completion then return.  Motors are stopped by the
+/// [`LabyrinthPlan::execute`] caller after each segment.
 #[async_trait::async_trait]
 pub trait TrajectorySegment {
     async fn execute<'a>(&self, motor_left: &mut Motor<'a, TIM3>, motor_right: &mut Motor<'a, TIM2>);

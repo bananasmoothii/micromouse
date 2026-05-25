@@ -1,3 +1,6 @@
+//! Panic handler for bare-metal operation. The difference with panic_probe is that this cuts
+//! power be setting EN on the custom PCB to LOW.
+
 use defmt::{error, info};
 
 #[panic_handler]

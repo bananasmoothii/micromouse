@@ -1,3 +1,22 @@
+//! Sequential I2C bus initialisation for the three VL53L1X ToF distance sensors.
+//!
+//! ## Why sequential?
+//! All three sensors power up at the default I2C address (0x29).  To give each one a unique
+//! address, they are kept in hardware reset (XSHUT low) and brought up one at a time:
+//! 1. All XSHUT pins driven low → all sensors in reset.
+//! 2. For each sensor: raise its XSHUT, call [`VL53L1XSensor::init_new`] (which reprograms
+//!    the address), apply bench-calibration coefficients, store the handle.
+//! 3. When all three handles are ready, spawn [`distance_sensor_task`].
+//!
+//! ## Address assignment
+//! Addresses are assigned `0x30`, `0x31`, `0x32` in left-to-right *mount* order.
+//! Because the two diagonal sensors are physically crossed, address does **not** equal
+//! looking direction — see [`crate::devices::vl53lxx::vl53l1x`] for the full mapping.
+//!
+//! ## I2C bus configuration
+//! 200 kHz, DMA-backed (TX: DMA1_CH6, RX: DMA1_CH0), 50 ms timeout.
+//! currently relies on the STM32 weak internal pull-ups plus parasitic capacitance.
+
 use crate::devices::vl53lxx::vl53l1x::{VL53L1XSensor, distance_sensor_task};
 use crate::{Irqs, devices};
 use alloc::boxed::Box;
@@ -14,7 +33,14 @@ use embassy_time::Duration;
 use embedded_hal_bus::i2c::RefCellDevice;
 use crate::utils::{DurationUtils, HertzUtils};
 
-/// There are only the three distance sensors in i2c devices
+/// Initialises the I2C bus and all three VL53L1X sensors, then spawns [`distance_sensor_task`].
+///
+/// # Parameters
+/// - `xshuts`: XSHUT pins in mount order (left → right).  Driven low first, then raised one
+///   at a time during address assignment.
+/// - `interrupts`: GPIO data-ready interrupt inputs in the same order.
+///
+/// Panics if any sensor fails to initialise.
 pub async fn init_i2c_devices(
     spawner: &mut Spawner,
     i2c_peri: Peri<'static, I2C1>,
@@ -28,7 +54,6 @@ pub async fn init_i2c_devices(
 ) {
     let mut i2c_config = Config::default();
     // Use 100kHz for more reliable communication when we don't have pull-up resistors
-    // lol we now have pull-up resistors and motors still prevent I2C communication due to tension drop I guess
     i2c_config.frequency = 200.khz();
     i2c_config.gpio_speed = Speed::High;
     i2c_config.timeout = Duration::from_millis(50);

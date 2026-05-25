@@ -1,3 +1,25 @@
+//! Firmware entry point for the STM32F446RE micromouse.
+//!
+//! Responsibilities:
+//! - Clock configuration (84 MHz from HSI via PLL).
+//! - Heap initialisation (`embedded-alloc`, 10 KB + sensor overhead).
+//! - Hardware peripheral setup: SPI/I2C, PWM timers, ADC, EXTI.
+//! - Spawning all Embassy async tasks.
+//! - Running the maze plan or motor-test sequence (see [`maze_runner_task`] /
+//!   [`motor_tests`]).
+//!
+//! ## Task map
+//! | Task | File | Role |
+//! |---|---|---|
+//! | `battery_monitoring_task` | `devices/battery.rs` | ADC voltage, LED bar, shutdown |
+//! | `buzzer_task` | `devices/buzzer.rs` | PWM audio via channel |
+//! | `distance_sensor_task` | `devices/vl53lxx/vl53l1x.rs` | 3 × ToF polling + recovery |
+//! | `positioning_task` | `positioning/mod.rs` | 20 ms sensor-fusion loop |
+//! | `overcurrent_protection_task` | `devices/motors.rs` | 4 A trip on motor current |
+//! | `motor_tests` / `maze_runner_task` | this file | trajectory execution |
+//!
+//! Swap the task spawned at the end of `main` between `motor_tests` and
+//! `maze_runner_task` to switch between a single free-run test and a full maze solve.
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -123,7 +145,6 @@ async fn main(mut spawner: Spawner) {
     let mut flash = Flash::new_blocking(p.FLASH);
     flash_log::startup_dump(&mut flash);
 
-    // TODO: add pull-up resistors to SDA and SCL
     init_i2c_devices(
         &mut spawner,
         p.I2C1,
@@ -242,6 +263,8 @@ async fn main(mut spawner: Spawner) {
     button_task(user_button, led).await;
 }
 
+/// Simple button handler that toggles the user LED on every edge.
+/// Kept alive as the `main` async future so the Embassy executor never exits.
 async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
     info!("Main task ready");
     let mut toggle_led = || {
@@ -261,14 +284,19 @@ async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
 
 // ── Maze runner ─────────────────────────────────────────────────────────────
 
-// Start cell and initial heading.  Edit these to change the launch position.
+/// Starting cell column (east index, 0 = left border).  Edit to change launch position.
 const START_X: usize = 0;
+/// Starting cell row (south index, 0 = top border).  Edit to change launch position.
 const START_Y: usize = 0;
+/// Cardinal heading the robot faces at the start.
 const START_HEADING: CardinalHeading = CardinalHeading::East;
-// Distance from the front wall at which the robot stops, centred in the cell:
-//   (LAB_CELL - ROBOT_LENGTH) / 2  =  (0.18 - 0.13) / 2  =  0.025 m
+/// Distance (m) from the front wall at which the robot stops, centred in a cell.
+/// Formula: (LAB_CELL - ROBOT_LENGTH) / 2 = (0.18 - 0.13) / 2 = 0.025 m.
 const STOP_OFFSET: f32 = 0.025;
 
+/// Full maze-solve task. **Not currently spawned** — `motor_tests` is spawned instead.
+/// To switch to a real maze run, replace `spawner.spawn(motor_tests(...))` with
+/// `spawner.spawn(maze_runner_task(...))` at the bottom of `main`.
 #[embassy_executor::task]
 async fn maze_runner_task(
     mut motor_left: Motor<'static, TIM3>,
@@ -322,8 +350,13 @@ fn build_known_maze() -> Labyrinth {
     lab
 }
 
-// ── Commented-out single-segment motor test (kept for reference) ─────────────
+// ── Single-segment motor test (swap with maze_runner_task for free runs) ─────
 
+/// Ad-hoc motor/trajectory test harness.
+///
+/// Uncomment individual `StraightLine` / `InPlaceTurn` entries in the `segments` vec to
+/// test specific maneuvers without a full maze plan.  The robot waits 2 s after boot
+/// (allowing you to set it down), runs all segments, beeps, then saves flash logs.
 #[embassy_executor::task]
 async fn motor_tests(
     mut motor_left: Motor<'static, TIM3>,

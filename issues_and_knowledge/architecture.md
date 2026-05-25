@@ -291,3 +291,4 @@ All properties involving rotation inside the `SensorFusion` structure are ground
    If you shield the magnetometer from motor PWM fields, you can radically *DECREASE* this to $0.5$. This would give the
    robot instant, absolute positional permanence. Until then, it stays high to prevent motor noise from ruining the
    Gyro's active tracking.
+

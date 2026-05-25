@@ -1,3 +1,16 @@
+//! VL53L0X ToF sensor driver — **UNUSED / legacy code, kept for reference only.**
+//!
+//! This driver was written when the robot used the older VL53L0X sensor.  All three sensors
+//! were later replaced with VL53L1X (longer range, interrupt-driven, per-sensor calibration).
+//! The active driver is [`crate::devices::vl53lxx::vl53l1x`].
+//!
+//! **Do not instantiate any type from this module** — nothing in the current firmware does, and
+//! the `VL53L0X_CHANNEL` static is never consumed.  The module is kept to preserve the
+//! I2C-recovery logic and the `distance_sensor_task` pattern as a reference for future sensors.
+//!
+//! If you need to re-enable the VL53L0X, wire it up in `i2c_devices.rs` analogously to the
+//! VL53L1X init sequence and spawn `start_continuous_measurement` from there.
+
 use crate::devices::vl53lxx::Config;
 use core::fmt::Debug;
 use defmt::{Format, debug, warn};

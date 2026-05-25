@@ -1,3 +1,29 @@
+//! DC motor driver: PWM control, battery-voltage compensation, and overcurrent protection.
+//!
+//! ## Hardware
+//! Each motor is driven by an H-bridge with two direction pins (IN_A, IN_B) and one PWM pin:
+//! - `IN_A high, IN_B low` → forward.
+//! - `IN_A low, IN_B high` → reverse.
+//! - `IN_A high, IN_B high` → active brake (both switches on same side).
+//! - `IN_A low,  IN_B low`  → coast (PWM off).
+//!
+//! ## Speed ↔ PWM mapping
+//! [`Motor::set_speed`] converts m/s → PWM duty cycle using an empirical linear factor
+//! (`PWM_TO_SPEED_FACTOR`) measured at `CALIBRATION_VOLTAGE`.  The factor is scaled by the
+//! live pack voltage from [`BATTERY_VOLTAGE_MV`] so the commanded speed is approximately
+//! correct regardless of battery state-of-charge.
+//!
+//! ## Overcurrent protection
+//! [`overcurrent_protection_task`] reads the motor driver's current-sense ADC pins at 50 Hz.
+//! If either motor exceeds 4 A it disables that motor's enable pin for 5 s.
+//! This actually never happens, the only thing that happens is a voltage drop that power-cycles
+//! the MCU, but due to the battery protection circuit, if the robot turns off, it can't turn back
+//! on by itself.
+//!
+//! ## Wheel asymmetry compensation
+//! `LEFT_WHEEL_SPEED_FACTOR` / `RIGHT_WHEEL_SPEED_FACTOR` are empirical trim values that
+//! make both wheels travel at the same speed for the same PWM duty cycle.
+
 use crate::utils::DurationUtils;
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering::Relaxed;
@@ -9,9 +35,13 @@ use embassy_stm32::timer::{Channel, GeneralInstance4Channel};
 use embassy_stm32::{Peri, peripherals};
 use crate::devices::battery::BATTERY_VOLTAGE_MV;
 
+/// Direction flag for the left wheel, written by [`Motor::set_pwm`] and read by the hall ISR
+/// in [`crate::devices::hall_sensor_3144`] to determine tick sign.
 pub static LEFT_FORWARD: AtomicBool = AtomicBool::new(true);
+/// Direction flag for the right wheel, same role as [`LEFT_FORWARD`].
 pub static RIGHT_FORWARD: AtomicBool = AtomicBool::new(true);
 
+/// Identifies which side of the robot a [`Motor`] is on, for asymmetry compensation.
 pub enum WheelSide {
     Left,
     Right,
@@ -31,6 +61,9 @@ const MIN_USABLE_PWM: f32 = 0.095;
 /// Motors might not turn below this due to too low regime
 pub const MIN_USABLE_SPEED: f32 = MIN_USABLE_PWM * PWM_TO_SPEED_FACTOR;
 
+/// One DC motor controlled through an H-bridge.
+///
+/// Owns the two direction GPIO pins and the PWM channel for its side of the robot.
 pub struct Motor<'d, T: GeneralInstance4Channel> {
     in_a: Output<'d>,
     in_b: Output<'d>,
@@ -100,6 +133,7 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
         self.set_pwm(speed_m_s / factor)
     }
 
+    /// Active brake: both IN pins high, 25% PWM duty to create a mild holding torque.
     pub fn brake(&mut self) {
         self.in_a.set_high();
         self.in_b.set_high();
@@ -111,6 +145,9 @@ impl<'d, T: GeneralInstance4Channel> Motor<'d, T> {
         }
     }
 
+    /// Coast (free-wheel): both IN pins low, PWM disabled.
+    /// **Currently unused** — the firmware always calls `set_speed(0.0)` (which brakes) instead.
+    /// Kept as an option if a gentler stop is ever needed.
     pub fn neutral(&mut self) {
         self.in_a.set_low();
         self.in_b.set_low();
@@ -131,8 +168,10 @@ pub async fn overcurrent_protection_task(
     let mut enable1 = Output::new(enable_motor1, Level::High, Speed::Low);
     let mut enable2 = Output::new(enable_motor2, Level::High, Speed::Low);
 
+    // Current = (ADC_raw / ADC_MAX) × V_REF / R_SENSE × K
+    // K = amplifier gain of the current-sense circuit on this motor driver board.
     const K: f32 = 11370.0;
-    const R_SENSE: f32 = 1500.0;
+    const R_SENSE: f32 = 1500.0; // sense resistor in mΩ (1.5 Ω)
     const ADC_MAX: f32 = 4095.0;
     const V_REF: f32 = 3.3;
 

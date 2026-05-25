@@ -1,3 +1,44 @@
+//! Straight-line trajectory segment with PI speed control, heading hold, and wall-following.
+//!
+//! **Note**: This is heavily AI-generated as I didn't have time to do otherwise, even if I did
+//! write the beginning myself because the first version didn't work at all. This doesn't work
+//! perfectly (doesn't exactly do what was requested, for instance Distance(1.0) doesn't do 1.0
+//! meters perfectly), but there are a lot of causes to this: unprecise odometry, wonky wheels,
+//! incorrectly tuned constants...
+//!
+//! ## Goal modes
+//! - [`StraightLineGoal::Distance(m)`] — encoder-based: stop after `m` metres.
+//! - [`StraightLineGoal::DistanceToFrontWall(offset)`] — ToF-based: stop when the front sensor
+//!   reads `offset` metres to the wall.  Encoder odometry extrapolates between 66 ms sensor
+//!   updates; sensor lag (~250 ms pipeline) is subtracted from the measurement before seeding
+//!   the encoder reference.
+//!
+//! ## Speed controller
+//! Position-form PI on `(target_speed − v_forward)`.  A trapezoidal velocity profile is
+//! commanded: accelerate at `ACCELERATION` m/s² then decelerate at `DECELERATION` m/s² so the
+//! robot arrives at exactly `out_speed`.  The integral is scaled down at the start of decel
+//! (`DECEL_I_FACTOR`) to prevent it from fighting braking.
+//!
+//! ## Heading controller
+//! Position-form PI on `(current_theta − initial_theta)`.  A non-zero `initial_heading_error`
+//! (from an imperfect preceding turn) is absorbed into `initial_theta` and pre-seeds the integral
+//! so correction begins on the very first tick.
+//!
+//! ## Wall-following correction
+//! Side diagonal distances (from [`VL53L1X_45D_LEFT_WATCH`] / [`VL53L1X_45D_RIGHT_WATCH`]) are
+//! projected onto the lateral axis (÷ √2) and added to `heading_error`:
+//! - **Both walls visible**: centering force towards `PREFERRED_CLEARANCE` (2.5× `LATERAL_CLEARANCE`).
+//! - **One wall visible**: conservative avoidance; fires only when actually closer than the
+//!   natural corridor centre to avoid over-correcting into open space.
+//! - **Approach rate** (`WallRateBuffer`): dampens oscillation by countering closing speed.
+//! - **During decel**: wall correction is scaled to 30% so deceleration noise doesn't cause
+//!   heading oscillation near the end of the cell.
+//!
+//! ## Heading integral persistence
+//! The heading integral is stored in an `AtomicU32` (`HEADING_INTEGRAL`) and reloaded by the
+//! next segment running in the *same* corridor direction (no turn between segments).  It is
+//! reset and pre-seeded when `initial_heading_error != 0` (after a turn).
+
 use crate::Box;
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_CUMULATIVE, RIGHT_TICKS_CUMULATIVE};
 use crate::devices::motors::{MIN_USABLE_SPEED, Motor};
@@ -82,8 +123,11 @@ const SENSOR_LAG_S: f32 = 0.250;
 
 static HEADING_INTEGRAL: AtomicU32 = AtomicU32::new(0f32.to_bits());
 
+/// Stop condition for a [`StraightLine`] segment.
 pub enum StraightLineGoal {
+    /// Stop after travelling exactly this many metres (encoder-based).
     Distance(f32),
+    /// Stop when the front ToF sensor reads this many metres to the wall (ToF + encoder hybrid).
     DistanceToFrontWall(f32),
 }
 
@@ -513,6 +557,9 @@ impl WallRateBuffer {
 }
 
 const SIDE_WALL_STALE_MEASUREMENT: Duration = Duration::from_millis(150);
+/// Maximum lateral distance at which a side wall is considered "present" for wall-following.
+/// **Currently unused** — the active logic uses `PREFERRED_CLEARANCE` thresholds instead.
+/// Kept as a reference value: at this distance the opposing wall would be flush with the robot.
 const FOLLOWED_WALL_MAX_DIST: f32 = LAB_CELL - ROBOT_WIDTH;
 
 impl StraightLine {

@@ -20,9 +20,19 @@ https://cad.onshape.com/documents/aaf7a6983651c7702bceaa13/w/41b76918edb6f00955c
 
 ## Flash and run code
 
+Install [probe-rs](https://probe.rs/) with one of the methods in their docs, for example with Cargo:
+
+```sh
+cargo binstall probe-rs-tools
+```
+
+Then flash and run with:
+
 ```sh
 cargo run
 ```
+
+(configured in `./.cargo`)
 
 The robot has a power mechanism that cuts power when battery isn't measured to be enough, but this requires you to
 maintain the button (on the back custom PCB) pressed when flashing the MCU. I recommend having an IDE keyboard

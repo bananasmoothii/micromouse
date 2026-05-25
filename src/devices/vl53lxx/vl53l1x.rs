@@ -1,3 +1,37 @@
+//! VL53L1X ToF distance sensor driver and measurement task.
+//!
+//! ## Sensor layout (physical → looking direction mapping)
+//! Three sensors share one I2C bus and are reassigned I2C addresses during init:
+//!
+//! | Address | Mounted position | Looks toward | Watch |
+//! |---|---|---|---|
+//! | 0x30 | Left side of robot | 45° **right** | [`VL53L1X_45D_RIGHT_WATCH`] |
+//! | 0x31 | Centre (forward) | **straight** | [`VL53L1X_MIDDLE_WATCH`] |
+//! | 0x32 | Right side of robot | 45° **left** | [`VL53L1X_45D_LEFT_WATCH`] |
+//!
+//! The diagonal sensors are physically crossed (their cables route to the opposite side of the
+//! sensor PCB), so the address ≠ looking direction.  Always refer to the *Watch* name, not the
+//! address, when consuming sensor data.
+//!
+//! ## Measurement pipeline
+//! 1. [`distance_sensor_task`] waits for a GPIO data-ready interrupt from any of the three
+//!    sensors (or a 150 ms timeout as a fallback).
+//! 2. [`get_ranging_measurement_data`] is called on the ready sensor.
+//! 3. Invalid status readings (non-`RANGE_VALID`) discard the EMA filter state so recovery
+//!    doesn't blend stale data with fresh measurements.
+//! 4. Valid readings are affine-corrected then EMA-filtered and published on the appropriate
+//!    [`embassy_sync::watch::Watch`].
+//!
+//! ## Recovery
+//! On any I2C error, all three XSHUT pins are driven low, then
+//! [`VL53L1XSensor::i2c_swrst_recovery`] clears the I2C peripheral's BSY flag (a known STM32F4
+//! silicon errata), and each sensor is power-cycled and re-initialised individually.
+//!
+//! ## Calibration
+//! Per-sensor affine correction (`slope`, `offset_mm`) is applied to the raw range reading.
+//! Values are set in [`crate::i2c_devices::init_i2c_devices`] from two-point bench measurements.
+//! Re-calibrate after any change to the sensor ROI or cover glass.
+
 use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask};
 use crate::devices::vl53lxx::{Config, MeasurementData};
 use crate::utils::FairSelect3;
@@ -44,6 +78,9 @@ type E = i2c::Error;
 
 /// Latest distance reading plus the time it was captured. Consumers should treat readings as
 /// stale once their `at` timestamp is more than a few sensor periods old (~200 ms).
+///
+/// **Currently unused** — the firmware reads distances directly from the [`DistWatch`] watches.
+/// Kept as a convenience wrapper for future code that needs a timestamped snapshot by value.
 #[derive(Clone)]
 pub struct DistanceSnapshot {
     pub data: RangingMeasurementData,
@@ -186,6 +223,8 @@ impl VL53L1XSensor {
         Ok(())
     }
 
+    /// **Currently unused** — all consumers read the [`DistWatch`] directly.
+    /// Kept as an alternative access path if polling is ever needed without a Watch receiver.
     pub fn get_latest_measurement(&self) -> &RangingMeasurementData {
         &self.last_data
     }

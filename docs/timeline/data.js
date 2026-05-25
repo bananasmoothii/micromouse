@@ -7,6 +7,22 @@ const TIMELINE_DATA = {
       "color": "#818cf8",
       "commits": [
         {
+          "hash": "428b9416",
+          "date": "2026-05-23T10:42:38",
+          "author": "Bananasmoothii",
+          "message": "soutenance de merde",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "51b0b4ab",
+          "date": "2026-05-21T17:57:04",
+          "author": "Bananasmoothii",
+          "message": "I'm done with this (still doesn't really work)",
+          "merged": true,
+          "mine": true
+        },
+        {
           "hash": "d1f1de94",
           "date": "2026-05-21T16:23:39",
           "author": "Bananasmoothii",

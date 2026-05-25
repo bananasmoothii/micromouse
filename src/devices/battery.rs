@@ -1,3 +1,22 @@
+//! 2S LiPo battery monitor: voltage measurement, LED state-of-charge bar, and low-voltage shutdown.
+//!
+//! ## Hardware (on the custom PCB in the pcb folder)
+//! - **Cell voltage tap** (optional, PC0): first cell mid-tap through 100 kΩ / 51 kΩ divider.
+//! - **Pack voltage** (PC1): total 2S pack voltage through the same divider ratio.
+//! - **EN pin** (PC4): drives the motor-driver enable line; pulled low on undervoltage.
+//! - **LED bar** (PB1, PB15, PB14, PB13): 4 LEDs show 25 / 50 / 75 / 95 % SoC thresholds.
+//!
+//! ## Modes
+//! - **Two-cell mode** (PC0 present): reads each cell individually, shuts down if either cell
+//!   drops below 3.3 V (≈ 3.0 V real, accounting for resistor tolerances).
+//! - **Combined mode** (PC0 absent): reads only the total pack voltage; shuts down below 7.1 V.
+//!
+//! ## Shutdown sequence
+//! Plays the startup melody in reverse via [`BUZZER_CHANNEL`], waits 500 ms, then drives EN low.
+//!
+//! ## Battery percentage mapping
+//! Linear interpolation: 7.0 V → 0 %, 8.4 V → 100 % (2S LiPo nominal range).
+
 use crate::devices::buzzer::{BUZZER_CHANNEL, BuzzerTask, INIT_MUSIC};
 use crate::utils::{DurationUtils, HertzUtils};
 use alloc::format;
@@ -9,11 +28,16 @@ use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::peripherals::{ADC1, PC0, PC1, PC4};
 use embassy_stm32::Peri;
 
-/// Current battery voltage in millivolts, updated by battery_monitoring_task.
+/// Current pack voltage in millivolts, written by `battery_monitoring_task`.
+/// Read by [`crate::devices::motors::Motor::set_speed`] to compensate PWM for voltage sag.
 pub static BATTERY_VOLTAGE_MV: AtomicU32 = AtomicU32::new(0);
 
 static SAMPLE_CYCLES: SampleTime = SampleTime::CYCLES144;
 
+/// Performs one blocking battery measurement, then spawns `battery_monitoring_task`.
+///
+/// The blocking pre-check ensures the robot halts immediately on boot if the battery is
+/// critically low, before any motion starts.
 pub async fn start_battery_monitoring(
     spawner: &Spawner,
     mut adc_module: Adc<'static, ADC1>,

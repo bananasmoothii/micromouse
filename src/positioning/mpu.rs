@@ -1,22 +1,47 @@
+//! MPU-9250 data post-processing: axis remapping, gyro integration, and magnetometer heading.
+//!
+//! ## Axis convention
+//! The IMU is mounted upside-down on the PCB. Y and Z axes are inverted in software so that
+//! the sensor's output matches the robot's right-hand coordinate frame (z pointing up).
+//!
+//! ## Hard-iron calibration
+//! A static hard-iron offset `(hard_iron_x, hard_iron_y)` is subtracted from every
+//! magnetometer reading.  The offset is estimated at startup from 3 consecutive readings
+//! with the robot stationary (see [`crate::positioning`]).  This compensates for the DC
+//! magnetic bias caused by the PCB traces and permanent magnets in the drive motors.
+//!
+//! ## Relative magnetometer heading
+//! The absolute compass heading is computed as `atan2(cal_y, cal_x)`.  To make it independent
+//! of the robot's starting orientation, the *first* finite reading is saved as `initial_mag_heading`
+//! and all subsequent readings are expressed as the difference from that baseline.
+//! The output `relative_mag` is wrapped to `(−π, π]`.
+
 use core::f32::consts::PI;
 use embassy_time::Instant;
 use micromath::F32Ext;
 
+/// Output of one [`MpuProcessor::update`] call.
 #[derive(Default)]
 pub struct MpuResult {
+    /// Heading change in radians from gyro integration over `dt` (positive = CCW).
     pub d_theta: f32,
+    /// Magnetometer heading relative to startup orientation, wrapped to (−π, π] radians.
     pub relative_mag: f32,
+    /// Time since the previous call in seconds. Zero on the first call.
     pub dt: f32,
 }
 
+/// Stateful processor for raw MPU-9250 samples. One instance lives in [`crate::positioning::positioning_task`].
 pub struct MpuProcessor {
     last_update_time: Option<Instant>,
+    /// Absolute magnetometer heading at first valid reading — used as the zero reference.
     initial_mag_heading: Option<f32>,
     hard_iron_x: f32,
     hard_iron_y: f32,
 }
 
 impl MpuProcessor {
+    /// Creates a new processor with the given static hard-iron offset `(x, y)`.
     pub fn new(hard_iron: (f32, f32)) -> Self {
         Self {
             last_update_time: None,
@@ -26,6 +51,10 @@ impl MpuProcessor {
         }
     }
 
+    /// Processes one sample from the IMU and returns the derived heading increments.
+    ///
+    /// `gyro` and `mag` are raw sensor values in the sensor's native units
+    /// (rad/s for gyro, µT for mag).
     pub fn update(&mut self, mut gyro: [f32; 3], mut mag: [f32; 3]) -> MpuResult {
         let now = Instant::now();
 

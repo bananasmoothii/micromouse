@@ -1,3 +1,31 @@
+//! Hall-effect wheel encoder driver (A3144 sensors on PC2 / PC3).
+//!
+//! ## Design rationale
+//! Embassy's `ExtiInput::wait_for_rising_edge` disarms the interrupt after each edge and
+//! re-arms it only when the async task polls again.  At high wheel speed (>2 m/s) the time
+//! between edges can be shorter than one Embassy executor round-trip, causing missed ticks.
+//! This module bypasses Embassy and installs raw Cortex-M EXTI ISRs that run with no
+//! async overhead.
+//!
+//! ## Retriggerable debounce
+//! The A3144 output chatters on magnet edges — typically 3–8 bounces at 5–30 µs intervals
+//! over a ~340 µs window.  A fixed dead-time after accepting a tick would miss a second real
+//! tick that arrives before the dead-time expires.  Instead this driver uses *retriggerable*
+//! debounce: every edge (accepted or rejected) resets the 200 µs dead zone.  The first edge
+//! of each chatter burst is counted; all subsequent bounces keep extending the dead zone
+//! until the burst settles naturally.
+//!
+//! ## Tick sign
+//! The ISR reads [`LEFT_FORWARD`] / [`RIGHT_FORWARD`] to determine the sign of the tick
+//! increment (`+1` forward, `−1` reverse).  These flags are written by
+//! [`crate::devices::motors::Motor::set_pwm`] whenever the direction changes.
+//!
+//! ## Cumulative vs. total counters
+//! - `LEFT_TICKS_TOTAL` / `RIGHT_TICKS_TOTAL`: drained by [`crate::positioning::odometry`]
+//!   every 20 ms (swapped to 0 after reading).
+//! - `LEFT_TICKS_CUMULATIVE` / `RIGHT_TICKS_CUMULATIVE`: never reset; used by
+//!   `straight_line.rs` as absolute references for distance-based stop conditions.
+
 use crate::devices::motors::{LEFT_FORWARD, RIGHT_FORWARD};
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use Ordering::Relaxed;
@@ -24,8 +52,9 @@ pub static RIGHT_LAST_TICK_CYCLES: AtomicU32 = AtomicU32::new(0);
 pub static LEFT_TICK_INTERVAL_CYCLES: AtomicU32 = AtomicU32::new(0);
 pub static RIGHT_TICK_INTERVAL_CYCLES: AtomicU32 = AtomicU32::new(0);
 
-/// CPU cycles per µs. Must match SYSCLK configured in main.rs:
-/// 84 MHz SYSCLK (HSI × PLL) → 84 cycles/µs.
+/// CPU cycles per µs. Must match SYSCLK configured in `main.rs` (84 MHz HSI×PLL → 84 cycles/µs).
+/// **Not currently read** — `MIN_TICK_INTERVAL_CYCLES` is set directly in raw cycles.
+/// Exposed `pub` so a caller can recompute `MIN_TICK_INTERVAL_CYCLES` without digging into this file.
 pub const CYCLES_PER_US: u32 = 84;
 
 /// Minimum interval between two accepted rising edges, in DWT cycles.

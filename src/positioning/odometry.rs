@@ -1,3 +1,34 @@
+//! Wheel odometry: converts hall-encoder tick counts into a local-frame [`MovementDelta`].
+//!
+//! ## Kinematic model
+//! The robot uses skid-steering (differential drive). Given left and right wheel arc distances
+//! `d_left` and `d_right` over a small time step:
+//! ```text
+//! d_center = (d_right + d_left) / 2         — forward arc
+//! d_theta  = (d_right - d_left) / WHEEL_BASE — heading change
+//! ```
+//! For a pure straight line (`|d_theta| < 1e-6`) the robot moved `dx = d_center, dy = 0` in
+//! its local frame.
+//!
+//! For a turn the robot traces an arc of radius `R = d_center / d_theta`.  Starting at the
+//! origin facing `+x`, the end position in local frame is:
+//! ```text
+//! dx = R * sin(d_theta)
+//! dy = R * (1 - cos(d_theta))
+//! ```
+//! (See the long comment in [`get_odom_delta`] for the geometric derivation.)
+//!
+//! ## Tick counting vs. tick timing
+//! Forward velocity is computed from tick *count* over the 20 ms fusion window, not from
+//! inter-tick timestamps.  With only 12 ticks/rev, the ~11 ms inter-tick period at 0.5 m/s
+//! aliases badly against the 20 ms sample rate, producing large velocity spikes that corrupt
+//! the PI speed controller.  Tick-count velocity has bounded quantisation noise and no aliasing.
+//!
+//! ## Empirical wheel radius
+//! `WHEEL_RADIUS = 0.012 m` is derived empirically (including wheel slip) rather than from
+//! direct measurement (physical radius ≈ 0.0202 m).  Re-derive by driving a known distance and
+//! comparing encoder ticks to ground truth if the wheels or floor change.
+
 use crate::devices::hall_sensor_3144::{LEFT_TICKS_TOTAL, RIGHT_TICKS_TOTAL};
 use crate::positioning::types::MovementDelta;
 use core::f32::consts::PI;
