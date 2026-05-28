@@ -12,50 +12,7 @@ backlogged queues.
 
 The following schema maps the entire system's data flow, from high-level maze planning to hardware control:
 
-```mermaid
-graph TD
-
-subgraph devices[devices/]
-    subgraph Sensors[Distance Sensors]
-        direction LR
-        0x30(Left<br/>0x30)
-        ---|I²C bus| 0x31(Middle<br/>0x31)
-        ---|I²C bus| 0x32(Right<br/>0x32)
-    end
-    Sensors -->|I²C bus| watches((DistWatch<br/>Watches))
-    Sensors --Interrupts (individual)--> watches
-
-    MPU(MPU9250)
-    3144(Hall Effect Sensors<br/>3144)
-    buzzer(Buzzer)
-    batterie(Battery)
-    moteurs(Motors)
-end
-
-subgraph positioning[positioning/]
-    3144 -->|EXTI &quotmanual&quot Interrupts| odometry{{odometry}}
-    -->|MovementDelta| fusion{{"Fusion<br/>(Kalman Filter)"}}
-    MPU --Polling (20ms) (SPI)--> mpu{{MPU}}
-    -->|MpuResult| fusion
-    -->|produces| current_pos((CURRENT_POS<br/>Mutex))
-end
-
-subgraph trajectory[trajectory/]
-    subgraph StraightLine["StraightLine (very hard, many parameters)"]
-        distance["Distance(f32)"]
-        distanceto["DistanceToFrontWall(f32)"]
-    end
-    InPlaceTurn["InPlaceTurn<br/>(not very precise due to speed)"]
-end
-
-
-main[main.rs: Initializations] --uses-->
-laby["Labyrinth (with walls pre-loaded)"] --creates--> 
-labyp["LabyrinthPlan (theoretical trajectory)"] --executes-->
-trajectory --commands-->moteurs
-trajectory --uses to adjust--> watches
-trajectory --uses--> current_pos
-```
+![architecture graph](../docs/build/architecture_graph.png)
 
 ### Task Structure Summary
 

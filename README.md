@@ -2,7 +2,22 @@
 
 ![robot](./docs/timeline/media/PXL_20260517_130954581.jpg)
 
-A school project aiming to make a Micromouse robot and make it solve a maze.
+A school project aiming to make a Micromouse robot and make it solve a maze (with official-size cells: 18x18 cm).
+
+## Flash and run code
+
+Install [Rust](https://doc.rust-lang.org/cargo/getting-started/installation.html) and [probe-rs](https://probe.rs/)
+with one of the methods in their docs. Then plug the STM32F446RE Nucleo board via USB and flash and run with:
+
+```sh
+cargo run
+```
+
+(configured in `./.cargo`)
+
+The robot has a power mechanism that cuts power when battery isn't charged enough, but this requires you to
+maintain the button (on the back custom PCB) pressed when flashing the MCU. I recommend having an IDE keyboard
+shortcut for this command. Flashing often fails on the first try, if it does just try again.
 
 ## Hardware used
 
@@ -11,8 +26,8 @@ A school project aiming to make a Micromouse robot and make it solve a maze.
 *
 Two [IGARASHI N 2738-45 motors](https://www.conrad.fr/fr/p/moteur-universel-a-balais-brushed-igarashi-2738-048-gfc-3-244503.html)
 *
-One [LiPo 2S battery](https://www.conrad.fr/fr/p/reely-pack-de-batterie-lipo-7-4-v-350-mah-nombre-de-cellules-2-25-c-softcase-bec-2617149.html) (
-6,6V - 8.4V) (bought two for using one while the other charges)
+One [LiPo 2S battery](https://www.conrad.fr/fr/p/reely-pack-de-batterie-lipo-7-4-v-350-mah-nombre-de-cellules-2-25-c-softcase-bec-2617149.html)
+(6V - 8.4V) (bought two for using one while the other charges)
 * Two 3144 Hall sensors (magnet → `DOUT = HIGH`) for odometry (12 magnets per wheel)
 * One MPU 9250 (accelerometer + gyroscope + magnetometer + temperature sensor)
 * Three VL53L1X distance sensors
@@ -33,28 +48,51 @@ This repo contains almost everything related to this project except the CAD mode
   [here](https://www.conrad.fr/fr/p/acier-roue-a-denture-frontale-reely-type-de-module-0-5-o-de-percage-2-3-mm-nombre-de-dents-12-240354.html)
 * Kerf compensation was set to **0.16mm** for me (set in Kiri:Moto)
 
-## Flash and run code
-
-Install [Rust](https://doc.rust-lang.org/cargo/getting-started/installation.html) and [probe-rs](https://probe.rs/)
-with one of the methods in their docs. Then flash and run with:
-
-```sh
-cargo run
-```
-
-(configured in `./.cargo`)
-
-The robot has a power mechanism that cuts power when battery isn't measured to be enough, but this requires you to
-maintain the button (on the back custom PCB) pressed when flashing the MCU. I recommend having an IDE keyboard
-shortcut for this command. Flashing often fails on the first try, if it does just try again.
-
 ## Build & assembly manual
 
 A full step-by-step guide to cutting the chassis, assembling the mechanics, and mounting all
 electronics is available in
 [issues_and_knowledge/build_manual.md](issues_and_knowledge/build_manual.md).
 
+### Robot overview
+
+![Build overview](docs/build/overview.png)
+![Sensors](docs/build/sensors.png)
+![Rear view](docs/build/rear_view.png)
+
+## Custom PCB
+
+Files for the custom pcb are in the `pcb` folder and can be opened with [KiCad](https://www.kicad.org/).
+
+### Export for manufacturing with JLCPCB
+
+I used JLCPCB to manufacture and assemble the PCB. For generating the production files, install this KiCad plugin:
+
+> **Fabrication Toolkit**
+>
+> Toolkit for automating PCB fabrication process with KiCad and JLC PCB.
+>
+> Features:
+> - Generates gerber files in correct format for production.
+> - Generates BOM file in correct format for production.
+> - Generates Pick and Place file in correct format for assembly.
+> - Automatic and manual component translations.
+> - Many more unique additional features.
+
+Production files will be generated in `pcb/production`. The files you're gonna need for JLCPCB are:
+
+- `pcb.zip` (contains the Gerber files)
+
+And for PCB assembly (PCBA):
+
+- `bom.csv` (Bill Of Materials)
+- `positions.csv` as "CPL" (Component Placement List)
+
 ## Repository structure
+
+**For more information, see [architecture.md](issues_and_knowledge/architecture.md)**
+
+![architecture graph](docs/build/architecture_graph.png)
 
 ```
 micromouse/
@@ -89,8 +127,11 @@ micromouse/
 │       ├── straight_line.rs      — Straight segment with trapezoidal velocity profile
 │       └── in_place_turn.rs      — In-place rotation segment
 │
-├── docs/
+├── docs/                         — Hosted on https://bananasmoothii.github.io/micromouse/
 │   └── timeline/                 — Project timeline web app (photos, videos, notes)
+│
+├── pcb/                          — KiCad files for the custom PCB
+│   └── production/               — JLCPCB production and assembly files
 │
 ├── issues_and_knowledge/         — Notes on hardware quirks, bugs, and build documentation
 │   ├── architecture.md           — High-level architecture overview

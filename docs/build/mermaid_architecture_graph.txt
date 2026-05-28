@@ -1,0 +1,69 @@
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'darkMode': true,
+    'background': '#1F164D',
+    'primaryColor': '#433ABA',
+    'primaryTextColor': '#FFFFFF',
+    'primaryBorderColor': '#6F79E3',
+    'secondaryColor': '#2B1C7E',
+    'secondaryTextColor': '#DDDDFF',
+    'secondaryBorderColor': '#433ABA',
+    'tertiaryColor': '#271872',
+    'tertiaryBorderColor': '#433ABA',
+    'lineColor': '#6F79E3',
+    'textColor': '#FFFFFF',
+    'mainBkg': '#433ABA',
+    'nodeBorder': '#6F79E3',
+    'clusterBkg': '#2B1C7E',
+    'clusterBorder': '#6F79E3',
+    'titleColor': '#A0A8F0',
+    'edgeLabelBackground': '#1F164D',
+    'nodeTextColor': '#FFFFFF',
+    'fontFamily': 'IBM Plex Mono, monospace',
+    'background': '#f9f9f9'
+  }
+}}%%
+
+graph TD
+
+subgraph devices[devices/]
+    subgraph Sensors[Distance Sensors]
+        direction LR
+        0x30(Left<br/>0x30)
+        ---|I²C bus| 0x31(Middle<br/>0x31)
+        ---|I²C bus| 0x32(Right<br/>0x32)
+    end
+    Sensors -->|I²C bus| watches((DistWatch<br/>Watches))
+    Sensors --Interrupts (individual)--> watches
+
+    MPU(MPU9250)
+    3144(Hall Effect Sensors<br/>3144)
+    buzzer(Buzzer)
+    batterie(Battery)
+    moteurs(Motors)
+end
+
+subgraph positioning[positioning/]
+    3144 -->|EXTI &quotmanual&quot Interrupts| odometry{{odometry}}
+    -->|MovementDelta| fusion{{"Fusion<br/>(Kalman Filter)"}}
+    MPU --Polling (20ms) (SPI)--> mpu{{MPU}}
+    -->|MpuResult| fusion
+    -->|produces| current_pos((CURRENT_POS<br/>Mutex))
+end
+
+subgraph trajectory[trajectory/]
+    subgraph StraightLine["StraightLine (very hard, many parameters)"]
+        distance["Distance(f32)"]
+        distanceto["DistanceToFrontWall(f32)"]
+    end
+    InPlaceTurn["InPlaceTurn<br/>(not very precise due to speed)"]
+end
+
+
+main[main.rs: Initializations] --uses-->
+laby["Labyrinth (with walls pre-loaded)"] --creates-->
+labyp["LabyrinthPlan (theoretical trajectory)"] --executes-->
+trajectory --commands-->moteurs
+trajectory --uses to adjust--> watches
+trajectory --uses--> current_pos

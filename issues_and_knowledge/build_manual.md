@@ -121,7 +121,7 @@ Either cut two 5 mm slices and superglue them together, or cut a single 10 mm pi
 and superglue them to the flat discs. Alignment must be perfect. Also cut the middle pinion (second picture) which
 is 5mm thick.
 
-![Assembled wheel](build_manual/image16.png) ![Gear rings and pinion](build_manual/image15.png)
+![Assembled wheel](build_manual/image16.png) ![pinion](build_manual/image15.png)
 
 **13. Make the axle assemblies.**  
 Find long screws with a long unthreaded shoulder to use as axles. Insert the screw through the
