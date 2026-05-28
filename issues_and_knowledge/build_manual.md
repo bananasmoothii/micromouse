@@ -26,7 +26,7 @@ of the Onshape document.
 1. In Onshape, go to the **"Châssis"** tab (bottom-left), then drag the **Rollback bar** in the
    left panel to sit just after **"Auto Layout"**.
 
-   ![Rollback bar position](build_manual/image2.png)
+   ![Rollback bar position](media/image2.png)
 
 2. Open **Kiri:Moto** (bottom-left menu).
 
@@ -36,7 +36,7 @@ of the Onshape document.
 4. Go to **File → Import**, click the **Part Studio** icon, and import the chassis assembly
    (it will come in disassembled).
 
-   ![Kiri:Moto import](build_manual/image3.png)
+   ![Kiri:Moto import](media/image3.png)
 
 5. Set a **kerf compensation** (cut offset). A value of **0.16 mm** worked best.
 
@@ -68,60 +68,60 @@ next step is complete.
 **1. Insert the motors (with wires already soldered) into the center motor mounts.**  
 Note the orientation: motors are wider on one side, and the mounts match.
 
-![Motors in mounts](build_manual/image4.png)
+![Motors in mounts](media/image4.png)
 
 **2. Insert the motor assembly into the base plate.**
 
-![Assembly into base](build_manual/image5.png)
+![Assembly into base](media/image5.png)
 
 **3. Attach the light-blue front piece *before* any further assembly — it cannot be fitted later.**
 
-![Front piece](build_manual/image6.png)
+![Front piece](media/image6.png)
 
 **4. Attach the side panels and the Pololu distance-sensor mounts.**
 
-![Side panels and sensor mounts](build_manual/image7.png)
+![Side panels and sensor mounts](media/image7.png)
 
 **5. Attach the SparkFun MPU-9250 mount.**
 
-![MPU mount](build_manual/image8.png)
+![MPU mount](media/image8.png)
 
 **6. Add the drive gear and the screws on the motor (repeat on both sides).**  
 Note: the drive gear is fixed as close as possible to the chassis to gain a few millimeters.
 
-![Drive gear and axle](build_manual/image9.png)
+![Drive gear and axle](media/image9.png)
 
 **7. Install the distance sensors and battery** (the battery can optionally be secured with a
 screw at the front).
 
-![Sensors and battery](build_manual/image10.png)
+![Sensors and battery](media/image10.png)
 
 **8. Mount the Nucleo board** using screws through the two front holes.  
 Note: the right-hand screw has very little clearance under it — stack several washers to raise it to the
 correct height if your screw is too long.
 
-![Nucleo board](build_manual/image11.png)
+![Nucleo board](media/image11.png)
 
 **9. Fix the Nucleo board with the custom rear PCB**, it screws into the Nucleo (add a nut underneath).  
 The chassis' wood must be bended slightly to slide the PCB into position. If the wood doesn't flex enough,
 you might want to change the assembly order
 
-![Custom PCB](build_manual/image12.png)
+![Custom PCB](media/image12.png)
 
 **10. Mount the motor driver board.**
 
-![Motor driver](build_manual/image13.png)
+![Motor driver](media/image13.png)
 
 **11. Laser-cut the flat wheel discs from acrylic.**  
 Either cut two 5 mm slices and superglue them together, or cut a single 10 mm piece.
 
-![Wheel discs](build_manual/image14.png)
+![Wheel discs](media/image14.png)
 
 **12. Laser-cut the toothed gear rings** (two wheels need the 12 holes for the encoder magnets)
 and superglue them to the flat discs. Alignment must be perfect. Also cut the middle pinion (second picture) which
 is 5mm thick.
 
-![Assembled wheel](build_manual/image16.png) ![pinion](build_manual/image15.png)
+![Assembled wheel](media/image16.png) ![pinion](media/image15.png)
 
 **13. Make the axle assemblies.**  
 Find long screws with a long unthreaded shoulder to use as axles. Insert the screw through the
@@ -129,15 +129,15 @@ wheel with the head on the side *without* the gear. Add two or three small washe
 them to the screw to prevent axial movement while still allowing rotation. Do the same for the
 idler pinion. Then screw the complete wheel assemblies into the chassis.
 
-![Wheel axle assembly](build_manual/image17.jpeg)
+![Wheel axle assembly](media/image17.jpeg)
 
 > A small amount of hot glue between the screw shafts and the chassis adds resistance to shocks.
 
 **14. Mount the Hall-effect sensors** as close as possible to the wheel gear ring, secured with
 screws, nuts, and hot glue.
 
-![Hall sensors](build_manual/image18.png)
+![Hall sensors](media/image18.png)
 
 **15. Done ! Apply a little grease to the gears for less friction.**
 
-![Finished robot](build_manual/image19.png)
+![Finished robot](media/image19.png)

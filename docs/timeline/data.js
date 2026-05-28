@@ -7,6 +7,30 @@ const TIMELINE_DATA = {
       "color": "#818cf8",
       "commits": [
         {
+          "hash": "885f19f0",
+          "date": "2026-05-28T12:01:55",
+          "author": "Bananasmoothii",
+          "message": "more docs",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "d0112db8",
+          "date": "2026-05-27T13:50:19",
+          "author": "Bananasmoothii",
+          "message": "LICENSE",
+          "merged": true,
+          "mine": true
+        },
+        {
+          "hash": "e26b9eb3",
+          "date": "2026-05-26T18:36:48",
+          "author": "Bananasmoothii",
+          "message": "add build_manual.md",
+          "merged": true,
+          "mine": true
+        },
+        {
           "hash": "95017e27",
           "date": "2026-05-25T18:36:24",
           "author": "Bananasmoothii",

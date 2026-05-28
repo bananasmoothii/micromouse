@@ -54,6 +54,13 @@ A full step-by-step guide to cutting the chassis, assembling the mechanics, and 
 electronics is available in
 [issues_and_knowledge/build_manual.md](issues_and_knowledge/build_manual.md).
 
+## Issues encountered and solutions found
+
+A summary of the main problems hit during development — I²C crashes, missed encoder ticks,
+Embassy async pitfalls, the trajectory-point-list dead end, and more — along with the solutions,
+is documented in
+[issues_and_knowledge/issues_list.md](issues_and_knowledge/issues_list.md).
+
 ### Robot overview
 
 ![Build overview](docs/build/overview.png)
@@ -87,6 +94,39 @@ And for PCB assembly (PCBA):
 
 - `bom.csv` (Bill Of Materials)
 - `positions.csv` as "CPL" (Component Placement List)
+
+## How to debug
+
+Debugging on microcontroller can be quite tricky. For example, on the STM32F446RE, you can have **up to 6 breakpoints**
+enabled, and debugging works through probe-rs. If the probe-rs' GDB stub doesn't work (probably because
+[this issue](https://github.com/probe-rs/probe-rs/issues/3805) hasn't been fixed yet), try debugging through DAP.
+
+### On VSCode
+
+Probe-rs has made it easy to debug with VSCode thanks to an extension as explained
+[here](https://probe.rs/docs/tools/debugger/)
+
+### On RustRover
+
+There is also an extension that can debug through DAP but it is less straight-forward:
+
+1. Install the "lsp4ij" extension.
+2. Set it up
+   using [this tutorial](https://github.com/redhat-developer/lsp4ij/blob/main/docs/dap/user-defined-dap/codelldb.md).
+    * At the end, you should use "attach" instead of "launch" with these parameters:
+
+```json
+{
+  "chip": "STM32F446RE",
+  "coreConfigs": [
+    {
+      "programBinary": "${file}"
+    }
+  ]
+}
+```
+
+Note: RTT does not work here (I tried with `rttEnabled`).
 
 ## Repository structure
 
@@ -137,6 +177,7 @@ micromouse/
 │   ├── architecture.md           — High-level architecture overview
 │   ├── build_manual.md           — Step-by-step build & assembly manual (translated from Rapport.docx)
 │   ├── build_manual/             — Images referenced by build_manual.md
+│   ├── issues_list.md            — Issues encountered and solutions found (translated from Rapport.docx)
 │   ├── embassy_exti_missed_ticks_fix.md
 │   ├── i2c_registers_and_pullups_explained.md
 │   ├── monster moto shield ressources.md
