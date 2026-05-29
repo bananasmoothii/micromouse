@@ -49,6 +49,20 @@ The I²C communication bus was the source of many problems.
   bus, each sensor must have
   a unique I²C address, requiring address reassignment at startup. The Rust `vl53l1` library did
   not support this feature, so Claude and I added it in my fork of that library.
+  I opened a PR (link above), but the maintainer doesn't seem to be active, so it hasn't been merged.
+
+## CPU overload
+
+For a while I kept running into this: when the motors were running, only the farthest ToF
+distance sensor would return measurements. I first suspected the I²C bus was being disrupted by
+the motors' electromagnetic field due to missing pull-up resistors (which I added, to no effect).
+The real cause was different: the motor-control task was pushing total CPU usage just barely over
+budget. The distance sensor task manages all three sensors together (the simplest approach for
+resetting the I²C module in Rust, since resetting it also requires resetting all three sensors),
+using a `Select3` to pick whichever sensor had a measurement ready at the top of the loop. When
+CPU time ran short, all three sensors were ready simultaneously, and `Select3` always picked the
+first one. The fix was to implement a `FairSelect3` with a round-robin algorithm, and to
+increase the CPU clock from 16 MHz to 84 MHz.
 
 ## MPU in SPI mode
 
@@ -59,6 +73,28 @@ README.md). I therefore wanted to use SPI rather than I²C; however, as indicate
 [the documentation](https://learn.sparkfun.com/tutorials/mpu-9250-hookup-guide/all), soldering
 jumper SJ2 must be desoldered and resoldered differently, which was quite difficult and damaged
 the PCB. It is therefore impossible to switch this PCB back to I²C mode.
+
+## Laser cutter kerf calibration
+
+The laser cutter's cut width (~0.2 mm) is small but non-negligible when parts need to fit
+together. I started by trial-and-erroring the best kerf value for the gears (in wood, which I
+didn't adjust when I later switched to acrylic gears): I settled on **0.16 mm**, which is the
+value I give to Kiri:Moto. The wooden chassis pieces still struggled to fit, so I added an extra
+0.04 mm of clearance between parts in the Onshape 3D model, for a total effective kerf of 0.2 mm.
+In retrospect, the issue may simply have been that the kerf differs between 3 mm wood (chassis)
+and 5 mm wood/acrylic (wheels).
+
+## Conical gears
+
+The laser cutter uses optics to focus the beam on the material's surface, but the beam diverges
+slightly below that point, producing a slightly conical cut — the laser widens toward the bottom
+of the material. This is usually irrelevant, except for toothed gears: the teeth end up slightly
+angled and the gears mesh at an angle.
+
+![Conical gear cut from laser cutter](../docs/timeline/media/PXL_20260509_105133438.jpg)
+
+The fix is straightforward: assemble the gears flipped over so the two cones cancel each other
+out.
 
 ## Trajectory via point list
 
@@ -71,13 +107,27 @@ This allowed direct inclusion of optimizations such as rounded corners, but it d
 all: the robot is simply not capable of following such a precise trajectory, and trying to reach
 each point at the given time led to motor commands that were far too abrupt.
 
+## Magnet polarity
+
+The first time I glued the magnets into the wheels, 3 out of 4 were facing the wrong way. I
+discovered that my Hall-effect sensors only detect one magnetic polarity.
+
+## Two ticks per revolution
+
+Initially I only had 5 magnets, giving a maximum of 2 magnets per wheel and therefore two ticks
+detected per revolution. This was far too coarse: the robot had to travel roughly 6 cm before
+getting any new odometry information, making precise positioning impossible. To make things
+worse, unaligned wheels caused skewed tick counts — for example, one left tick, then one right
+tick immediately followed by another left tick, so the robot would always accumulate an extra
+left count.
+
 ## Tick counting for odometry
 
 To count ticks from the Hall-effect sensors, I initially used Embassy's async
 `ExtiInput::wait_for_falling_edge()` in a loop. This caused roughly **40% of ticks** to be
 silently dropped at moderate speeds (~0.5 m/s): Embassy disarms the interrupt after each edge
 and only re-arms it when `await` resumes, making any tick arriving in between invisible to the
-hardware. The fix was to replace this with a raw, always-armed interrupt handler
+hardware. The fix Claude found was to replace this with a raw, always-armed interrupt handler
 (`cortex_m_rt::interrupt`) that increments an `AtomicI32` directly on each edge without going
 through Embassy. For more details, see
 [embassy_exti_missed_ticks_fix.md](embassy_exti_missed_ticks_fix.md).
@@ -113,3 +163,8 @@ I then tried to get the robot to solve a more complex maze on the day of the pre
 it failed (the robot hit every wall). I don't think the problem would have been hard to fix, but
 I simply ran out of time. The code I added for solving more complex mazes broke the code that
 could handle the simple border layout above.
+
+To help debug, I used the `flash_log` module to generate graphs like the one below — a
+`DistanceToFrontWall` test run where the robot overshot slightly and hit the wall:
+
+![DistanceToFrontWall test graph](media/DistanceToFrontWall.png)
