@@ -178,7 +178,7 @@ pub async fn overcurrent_protection_task(
     loop {
         let mut max_raw1 = 0;
         for _ in 0..20 {
-            let raw = adc_module.blocking_read(&mut sense_motor1, SampleTime::CYCLES84);
+            let raw = adc_module.blocking_read(&mut sense_motor1, SampleTime::Cycles84);
             if raw > max_raw1 {
                 max_raw1 = raw;
             }
@@ -186,7 +186,7 @@ pub async fn overcurrent_protection_task(
 
         let mut max_raw2 = 0;
         for _ in 0..20 {
-            let raw = adc_module.blocking_read(&mut sense_motor2, SampleTime::CYCLES84);
+            let raw = adc_module.blocking_read(&mut sense_motor2, SampleTime::Cycles84);
             if raw > max_raw2 {
                 max_raw2 = raw;
             }

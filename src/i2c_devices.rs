@@ -26,6 +26,7 @@ use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_stm32::Peri;
 use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::mode::Async;
 use embassy_stm32::gpio::{Output, Speed};
 use embassy_stm32::i2c::{Config, I2c};
 use embassy_stm32::peripherals::{DMA1_CH0, DMA1_CH6, I2C1, PB8, PB9};
@@ -50,7 +51,7 @@ pub async fn init_i2c_devices(
     rx_dma: Peri<'static, DMA1_CH0>,
     irqs: Irqs,
     mut xshuts: [Output<'static>; 3],
-    interrupts: [ExtiInput<'static>; 3],
+    interrupts: [ExtiInput<'static, Async>; 3],
 ) {
     let mut i2c_config = Config::default();
     // Use 100kHz for more reliable communication when we don't have pull-up resistors
@@ -65,7 +66,7 @@ pub async fn init_i2c_devices(
     }
     50.ms_timer().await;
 
-    let i2c = I2c::new(i2c_peri, scl, sda, irqs, tx_dma, rx_dma, i2c_config);
+    let i2c = I2c::new(i2c_peri, scl, sda, tx_dma, rx_dma, irqs, i2c_config);
 
     // Leak i2c_rc to get a 'static reference, required for the sensor
     let i2c_rc = Box::leak(Box::new(RefCell::new(i2c)));
@@ -142,7 +143,7 @@ pub async fn init_i2c_devices(
 
     if let (Some(s1), Some(s2), Some(s3)) = (sensor1, sensor2, sensor3) {
         info!("Starting continuous measurement for all VL53L1X sensors");
-        spawner.spawn(distance_sensor_task(s1, s2, s3)).unwrap();
+        spawner.spawn(distance_sensor_task(s1, s2, s3).unwrap());
     } else {
         error!("Could not start all VL53L1X sensors, starting none.");
     }

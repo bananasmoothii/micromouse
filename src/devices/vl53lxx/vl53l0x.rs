@@ -34,7 +34,7 @@ pub static VL53L0X_CHANNEL: Channel<CriticalSectionRawMutex, MeasurementData, 4>
 /// to share the same I2C peripheral safely.
 pub struct VL53L0XSensor {
     device: VL53L0x<I>,
-    gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
+    gpio_interrupt: embassy_stm32::exti::ExtiInput<'static, embassy_stm32::mode::Async>,
     last_data: MeasurementData,
 }
 
@@ -94,9 +94,9 @@ impl VL53L0XSensor {
         self.device
             .start_continuous(0)
             .map_err(|e| StartError::I2cError(e))?;
-        spawner
-            .spawn(distance_sensor_task(self))
-            .map_err(|e| StartError::SpawnError(e))?;
+        spawner.spawn(
+            distance_sensor_task(self).map_err(|e| StartError::SpawnError(e))?,
+        );
         Ok(())
     }
 

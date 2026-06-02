@@ -7,10 +7,10 @@ publish = false
 
 [dependencies]
 # Change stm32f446re to your chip name, if necessary.
-embassy-stm32 = { version = "0.5.0", features = ["defmt", "stm32f446re", "unstable-pac", "time-driver-tim4", "exti", "chrono"] }
-embassy-sync = { version = "0.7.2", features = ["defmt"] }
-embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
-embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
+embassy-stm32 = { path = "../embassy/embassy-stm32", features = ["defmt", "stm32f446re", "unstable-pac", "time-driver-tim4", "exti", "chrono"] }
+embassy-sync = { path = "../embassy/embassy-sync", features = ["defmt"] }
+embassy-executor = { path = "../embassy/embassy-executor", features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { path = "../embassy/embassy-time", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
 embassy-futures = { version = "0.1", features = ["defmt"] }
 
 defmt = "1.0.1"
@@ -40,9 +40,6 @@ vl53l1 = { git = "https://github.com/bananasmoothii/vl53l1", features = ["defmt"
 vl53l0x = { git = "https://github.com/bananasmoothii/vl53l0x", rev = "afb05560", features = ["defmt"] }
 
 mpu9250 = { git = "https://github.com/bananasmoothii/mpu9250-forked", rev = "4bc31c80", features = ["defmt"] }
-
-[profile.release.package.embassy-stm32]
-opt-level = 1 # https://github.com/embassy-rs/embassy/issues/6129
 
 [profile.dev]
 opt-level = "z"

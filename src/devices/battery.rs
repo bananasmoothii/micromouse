@@ -32,7 +32,7 @@ use embassy_stm32::Peri;
 /// Read by [`crate::devices::motors::Motor::set_speed`] to compensate PWM for voltage sag.
 pub static BATTERY_VOLTAGE_MV: AtomicU32 = AtomicU32::new(0);
 
-static SAMPLE_CYCLES: SampleTime = SampleTime::CYCLES144;
+static SAMPLE_CYCLES: SampleTime = SampleTime::Cycles144;
 
 /// Performs one blocking battery measurement, then spawns `battery_monitoring_task`.
 ///
@@ -69,15 +69,10 @@ pub async fn start_battery_monitoring(
             .await;
     }
 
-    spawner
-        .spawn(battery_monitoring_task(
-            adc_module,
-            first_cell_pin,
-            second_cell_pin,
-            en_pin,
-            leds,
-        ))
-        .unwrap();
+    spawner.spawn(
+        battery_monitoring_task(adc_module, first_cell_pin, second_cell_pin, en_pin, leds)
+            .unwrap(),
+    );
 }
 
 // change types if needed, again this is because of embassy task not allowing generics

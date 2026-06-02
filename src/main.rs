@@ -53,12 +53,13 @@ use embassy_stm32::exti::{self, ExtiInput};
 use embassy_stm32::flash::Flash;
 use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
 use embassy_stm32::peripherals::{I2C1, TIM2, TIM3};
+use embassy_stm32::peripherals;
 use embassy_stm32::spi::Spi;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::Channel;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
-use embassy_stm32::{bind_interrupts, interrupt};
+use embassy_stm32::{bind_interrupts, dma, interrupt};
 use embassy_stm32::{i2c, spi, rcc};
 use embedded_alloc::LlffHeap as Heap;
 use crate::i2c_devices::init_i2c_devices;
@@ -76,6 +77,10 @@ bind_interrupts!(
         EXTI15_10 => exti::InterruptHandler<interrupt::typelevel::EXTI15_10>;
         I2C1_EV => i2c::EventInterruptHandler<I2C1>;
         I2C1_ER => i2c::ErrorInterruptHandler<I2C1>;
+        DMA1_STREAM0 => dma::InterruptHandler<peripherals::DMA1_CH0>;
+        DMA1_STREAM6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
+        DMA2_STREAM2 => dma::InterruptHandler<peripherals::DMA2_CH2>;
+        DMA2_STREAM3 => dma::InterruptHandler<peripherals::DMA2_CH3>;
     }
 );
 
@@ -93,18 +98,18 @@ async fn main(mut spawner: Spawner) {
     // it must match SYSCLK / 1_000_000.
     let mut rcc_config = rcc::Config::default();
     rcc_config.hsi = true;
-    rcc_config.pll_src = rcc::PllSource::HSI;
+    rcc_config.pll_src = rcc::PllSource::Hsi;
     rcc_config.pll = Some(rcc::Pll {
-        prediv: rcc::PllPreDiv::DIV16,
-        mul: rcc::PllMul::MUL168,
-        divp: Some(rcc::PllPDiv::DIV2),
-        divq: Some(rcc::PllQDiv::DIV7),
+        prediv: rcc::PllPreDiv::Div16,
+        mul: rcc::PllMul::Mul168,
+        divp: Some(rcc::PllPDiv::Div2),
+        divq: Some(rcc::PllQDiv::Div7),
         divr: None,
     });
-    rcc_config.sys = rcc::Sysclk::PLL1_P;
-    rcc_config.ahb_pre = rcc::AHBPrescaler::DIV1;
-    rcc_config.apb1_pre = rcc::APBPrescaler::DIV2;
-    rcc_config.apb2_pre = rcc::APBPrescaler::DIV1;
+    rcc_config.sys = rcc::Sysclk::Pll1P;
+    rcc_config.ahb_pre = rcc::AHBPrescaler::Div1;
+    rcc_config.apb1_pre = rcc::APBPrescaler::Div2;
+    rcc_config.apb2_pre = rcc::APBPrescaler::Div1;
     let mut stm_config = embassy_stm32::Config::default();
     stm_config.rcc = rcc_config;
     let p = embassy_stm32::init(stm_config);
@@ -126,8 +131,8 @@ async fn main(mut spawner: Spawner) {
 
     let buzzer_channel = PwmPin::new(p.PA11, OutputType::PushPull);
 
-    spawner
-        .spawn(buzzer_task(
+    spawner.spawn(
+        buzzer_task(
             SimplePwm::new(
                 p.TIM1,
                 None,
@@ -138,8 +143,9 @@ async fn main(mut spawner: Spawner) {
                 CountingMode::EdgeAlignedUp,
             ),
             Channel::Ch4,
-        ))
-        .unwrap();
+        )
+            .unwrap(),
+    );
 
     // Replay any log saved during the previous run, then erase the sector.
     let mut flash = Flash::new_blocking(p.FLASH);
@@ -185,6 +191,7 @@ async fn main(mut spawner: Spawner) {
         p.PA6,      // MISO
         p.DMA2_CH3, //
         p.DMA2_CH2, //
+        Irqs,
         spi_config,
     );
 
@@ -213,7 +220,7 @@ async fn main(mut spawner: Spawner) {
         }
     };
 
-    spawner.spawn(positioning_task(imu)).unwrap();
+    spawner.spawn(positioning_task(imu).unwrap());
 
     hall_sensor_3144::init(p.PC2, p.EXTI2, p.PC3, p.EXTI3);
 
@@ -243,19 +250,18 @@ async fn main(mut spawner: Spawner) {
     let motor_right = Motor::new(p.PB5, p.PC7, pwm2, Channel::Ch3, WheelSide::Right);
 
     // Start overcurrent protection
-    spawner
-        .spawn(devices::motors::overcurrent_protection_task(
+    spawner.spawn(
+        devices::motors::overcurrent_protection_task(
             Adc::new(p.ADC2),
             p.PA4,
             p.PB0,
             p.PA0,
             p.PA1,
-        ))
-        .unwrap();
+        )
+            .unwrap(),
+    );
 
-    spawner
-        .spawn(motor_tests(motor_left, motor_right, flash))
-        .unwrap();
+    spawner.spawn(motor_tests(motor_left, motor_right, flash).unwrap());
 
     let user_button = ExtiInput::new(p.PC13, p.EXTI13, Pull::None, Irqs);
     let led = Output::new(p.PA5, Level::Low, Speed::Medium);
@@ -265,7 +271,7 @@ async fn main(mut spawner: Spawner) {
 
 /// Simple button handler that toggles the user LED on every edge.
 /// Kept alive as the `main` async future so the Embassy executor never exits.
-async fn button_task(mut button: ExtiInput<'_>, mut led: Output<'_>) {
+async fn button_task(mut button: ExtiInput<'_, embassy_stm32::mode::Async>, mut led: Output<'_>) {
     info!("Main task ready");
     let mut toggle_led = || {
         led.toggle();

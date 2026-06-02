@@ -8,6 +8,7 @@
 
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Output;
+use embassy_stm32::mode::Async;
 
 pub mod vl53l0x;
 pub mod vl53l1x;
@@ -18,7 +19,7 @@ pub struct Config {
     /// Active-low reset pin.  Held low to keep the sensor in reset; driven high to boot it.
     pub xshut_pin: Output<'static>,
     /// Active-low data-ready interrupt from the sensor's GPIO1 pin.
-    pub gpio_interrupt: ExtiInput<'static>,
+    pub gpio_interrupt: ExtiInput<'static, Async>,
 }
 
 pub struct TimingConfig {

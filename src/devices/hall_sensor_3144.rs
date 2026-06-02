@@ -99,12 +99,12 @@ pub fn init(
 
         // Configure PC2 and PC3 as floating inputs (breakout board has pull-up)
         pac::GPIOC.moder().modify(|w| {
-            w.set_moder(2, pac::gpio::vals::Moder::INPUT);
-            w.set_moder(3, pac::gpio::vals::Moder::INPUT);
+            w.set_moder(2, pac::gpio::vals::Moder::Input);
+            w.set_moder(3, pac::gpio::vals::Moder::Input);
         });
         pac::GPIOC.pupdr().modify(|w| {
-            w.set_pupdr(2, pac::gpio::vals::Pupdr::FLOATING);
-            w.set_pupdr(3, pac::gpio::vals::Pupdr::FLOATING);
+            w.set_pupdr(2, pac::gpio::vals::Pupdr::Floating);
+            w.set_pupdr(3, pac::gpio::vals::Pupdr::Floating);
         });
 
         // Route port C to EXTI2 and EXTI3 (EXTICR1 = index 0, covers EXTI[3:0])

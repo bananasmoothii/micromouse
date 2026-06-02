@@ -60,7 +60,7 @@ pub struct VL53L1XSensor {
     i2c: I,
     address: u8,
     last_data: RangingMeasurementData,
-    gpio_interrupt: embassy_stm32::exti::ExtiInput<'static>,
+    gpio_interrupt: embassy_stm32::exti::ExtiInput<'static, embassy_stm32::mode::Async>,
     xshut_pin: Output<'static>,
     /// Per-sensor affine correction applied to `range_milli_meter` before the value is published
     /// or stored in `last_data`. `corrected = (raw as f32) * slope + offset_mm`, rounded.
